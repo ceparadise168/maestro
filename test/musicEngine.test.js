@@ -41,7 +41,7 @@ describe('musicEngine — contract', () => {
 });
 
 // ───────────────────────── 右盤五聲音(§3.1) ─────────────────────────
-describe('noteForSlot — 五聲音階(預設 C 大調 pentatonic)', () => {
+describe('noteForSlot — 五聲音階 pentatonic preset(C 大調)', () => {
   const engine = createMusicEngine({ key: 'C', scale: 'pentatonic' });
 
   it('slot 0..7 的 MIDI 等於 §3.1 的 [60,62,64,67,69,72,74,76]', () => {
@@ -67,6 +67,27 @@ describe('noteForSlot — 五聲音階(預設 C 大調 pentatonic)', () => {
     expect(engine.noteForSlot(5).midi).toBe(engine.noteForSlot(0).midi + 12);
     expect(engine.noteForSlot(6).midi).toBe(engine.noteForSlot(1).midi + 12);
     expect(engine.noteForSlot(7).midi).toBe(engine.noteForSlot(2).midi + 12);
+  });
+});
+
+// ──────────────── 右盤預設 = 大調全音階(§3.1;含 Fa/Ti) ────────────────
+describe('noteForSlot — 預設大調全音階(C D E F G A B + 高八度 C)', () => {
+  const engine = createMusicEngine(); // 不傳參數 → 用 config 預設(scale=major)
+
+  it('預設音階 = major(完整七音,含先前缺的 Fa/Ti)', () => {
+    expect(engine.getScale()).toBe('major');
+  });
+
+  it('slot 0..7 MIDI = [60,62,64,65,67,69,71,72](C4..C5 完整一個八度)', () => {
+    const got = Array.from({ length: SLOTS }, (_, k) => engine.noteForSlot(k).midi);
+    expect(got).toEqual([60, 62, 64, 65, 67, 69, 71, 72]);
+  });
+
+  it('涵蓋完整 C D E F G A B(回歸:F 與 B 不可再消失)', () => {
+    const names = new Set(
+      Array.from({ length: SLOTS }, (_, k) => engine.noteForSlot(k).name.replace(/-?\d+$/, '')),
+    );
+    expect(names).toEqual(new Set(['C', 'D', 'E', 'F', 'G', 'A', 'B']));
   });
 });
 

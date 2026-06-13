@@ -144,7 +144,9 @@ export const KEY_OFFSETS = {
 
 /** 預設調與音階 preset。 */
 export const DEFAULT_KEY = 'C';
-export const DEFAULT_SCALE = 'pentatonic';
+// 預設用大調全音階(C D E F G A B + 高八度 C),讓右盤能彈出需要 Fa/Ti 的完整旋律。
+// 五聲(pentatonic)仍保留為可切換 preset(更保險、亂指更不易撞音)。
+export const DEFAULT_SCALE = 'major';
 
 // ───────────────────────── 偵測 / 效能(設計 §2.4 / §8) ─────────────────────────
 /**

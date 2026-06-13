@@ -94,7 +94,8 @@ export function createApp(deps) {
     melodyLabels = [];
     for (let k = 0; k < SLOTS; k++) {
       chordLabels.push(musicEngine.chordForSlot(k).name);
-      melodyLabels.push(musicEngine.noteForSlot(k).name);
+      // melody 標籤顯示乾淨音名(去掉科學音高的八度數字),如 C4 → C。
+      melodyLabels.push(musicEngine.noteForSlot(k).name.replace(/-?\d+$/, ''));
     }
   }
 
