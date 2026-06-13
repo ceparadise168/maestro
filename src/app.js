@@ -16,7 +16,8 @@
  */
 
 import { CameraError } from './camera.js';
-import { DESIGN_VIEW, BPM, GROOVE_DEFAULT_ON, SLOTS, KEYBOARD, melodyGeom } from './config.js';
+import { DESIGN_VIEW, BPM, GROOVE_DEFAULT_ON, SLOTS, KEYBOARD, FIST_HOLD_MS, melodyGeom } from './config.js';
+import { bothHandsFist } from './gesture.js';
 
 /**
  * 建立 app(尚未啟動;呼叫 start() 才真正開相機 + 偵測 + 迴圈)。
@@ -80,6 +81,16 @@ export function createApp(deps) {
   let bpm = BPM;
   let melodyMode = KEYBOARD.defaultMode; // 右手排列模式(thirds / row)
 
+  // ── 停止手勢(指揮家雙手握拳)──
+  /** 最新一筆偵測「是否雙手握拳」(setHandFrame 更新)。 */
+  let latestBothFists = false;
+  /** 是否已停止演奏(latch:握拳 toggle 切換,維持到再次握拳)。 */
+  let paused = false;
+  /** 本輪「雙手握拳」起始時間(ms);0 = 目前非雙拳。 */
+  let bothFistsSince = 0;
+  /** 是否可觸發 toggle(放開雙拳後重新武裝;避免持續握拳連續切換)。 */
+  let pauseArmed = true;
+
   // 上一幀的 L/R 狀態,做 diff(只在 changed 時打 audioEngine,設計 §5)。
   let prevL = { state: 'REST', zone: null };
   let prevR = { state: 'REST', zone: null };
@@ -109,6 +120,8 @@ export function createApp(deps) {
   function setHandFrame(frame) {
     const hands = (frame && frame.hands) || [];
     latestTips = hands.map((hd) => hd.indexTip).filter(Boolean);
+    // 停止手勢:本幀是否雙手握拳(用完整 landmarks 判;設計 §2.5 / gesture.js)。
+    latestBothFists = bothHandsFist(hands);
     detectSeq++;
   }
 
@@ -134,12 +147,12 @@ export function createApp(deps) {
         break;
       case 'groove':
         grooveOn = !!change.groove;
-        audioEngine.setGroove(grooveOn, bpm);
+        if (!paused) audioEngine.setGroove(grooveOn, bpm); // 停止中只存設定,繼續時才套用
         ui.setGroove(grooveOn, bpm);
         break;
       case 'bpm':
         bpm = change.bpm;
-        audioEngine.setGroove(grooveOn, bpm);
+        if (!paused) audioEngine.setGroove(grooveOn, bpm);
         break;
       case 'instrument':
         audioEngine.setInstrument(change.chordInst, change.melodyInst);
@@ -174,6 +187,45 @@ export function createApp(deps) {
       apply(cur.zone);
     } else {
       apply(null);
+    }
+  }
+
+  /**
+   * 停止手勢狀態機(每幀呼叫):雙手握拳持續 ≥ FIST_HOLD_MS → toggle 停止/繼續;
+   * 放開雙拳後重新武裝(一次握拳手勢只切一次)。
+   * @param {number} now performance.now() ms
+   */
+  function evaluatePauseGesture(now) {
+    if (latestBothFists) {
+      if (bothFistsSince === 0) bothFistsSince = now;
+      if (pauseArmed && now - bothFistsSince >= FIST_HOLD_MS) {
+        setPaused(!paused);
+        pauseArmed = false; // 已切換;須放開雙拳才能再切
+      }
+    } else {
+      bothFistsSince = 0;
+      pauseArmed = true; // 放開 → 重新武裝
+    }
+  }
+
+  /**
+   * 進入 / 離開「停止演奏」。
+   *  - 進入:立即靜音(和弦 + 旋律 release、伴奏律動暫停),並把 diff 基準歸 REST,
+   *    使後續握拳期間不再觸發、且繼續後第一個指向能重新發聲。
+   *  - 離開:把伴奏律動還原成使用者設定(grooveOn);和弦/旋律待手指下次指向自然重觸。
+   * @param {boolean} v
+   */
+  function setPaused(v) {
+    if (v === paused) return;
+    paused = v;
+    if (paused) {
+      audioEngine.setMelodyNote(null);
+      audioEngine.setChord(null);
+      audioEngine.setGroove(false, bpm); // 暫停自動伴奏(grooveOn 仍保留使用者設定)
+      prevL = { state: 'REST', zone: null };
+      prevR = { state: 'REST', zone: null };
+    } else {
+      audioEngine.setGroove(grooveOn, bpm); // 還原使用者的伴奏設定
     }
   }
 
@@ -221,32 +273,39 @@ export function createApp(deps) {
       lastResult = result;
     }
 
-    // diff → 發聲
-    diffApply(result.L, prevL, (slot) => {
-      audioEngine.setChord(slot == null ? null : musicEngine.chordForSlot(slot).midi);
-    });
-    diffApply(result.R, prevR, (slot) => {
-      audioEngine.setMelodyNote(slot == null ? null : musicEngine.noteForSlot(slot).midi);
-    });
+    // 停止手勢(雙手握拳 toggle)。先評估,再決定本幀是否發聲。
+    evaluatePauseGesture(now);
 
-    prevL = { state: result.L.state, zone: result.L.zone };
-    prevR = { state: result.R.state, zone: result.R.zone };
+    if (!paused) {
+      // diff → 發聲
+      diffApply(result.L, prevL, (slot) => {
+        audioEngine.setChord(slot == null ? null : musicEngine.chordForSlot(slot).midi);
+      });
+      diffApply(result.R, prevR, (slot) => {
+        audioEngine.setMelodyNote(slot == null ? null : musicEngine.noteForSlot(slot).midi);
+      });
+      prevL = { state: result.L.state, zone: result.L.zone };
+      prevR = { state: result.R.state, zone: result.R.zone };
+    }
+    // 停止中:不觸發、prev 維持 REST(進入時已歸零),繼續後第一個指向會重新發聲。
 
     // 視覺回饋(設計 §6)。氣泡 label 由 musicEngine 即時查名(已隨 key/scale)。
+    // 停止中:仍畫游標(讓使用者看到手),但不顯示發聲高亮 / 氣泡。
     const present = !!(result.L.present || result.R.present);
-    const lActive = result.L.state === 'ACTIVE' && result.L.zone != null;
-    const rActive = result.R.state === 'ACTIVE' && result.R.zone != null;
+    const lActive = !paused && result.L.state === 'ACTIVE' && result.L.zone != null;
+    const rActive = !paused && result.R.state === 'ACTIVE' && result.R.zone != null;
     renderer.draw({
       present,
+      paused,
       L: {
-        zone: result.L.zone,
+        zone: paused ? null : result.L.zone,
         active: lActive,
         tip: result.L.tip,
         label: lActive ? chordLabels[result.L.zone] : undefined,
         slotLabels: chordLabels,
       },
       R: {
-        zone: result.R.zone,
+        zone: paused ? null : result.R.zone,
         aim: result.R.aim,
         active: rActive,
         tip: result.R.tip,
@@ -255,8 +314,9 @@ export function createApp(deps) {
       },
     });
 
-    // 提示狀態:有手 → live;無手 → no-hand(設計 §8)。
-    ui.setStatus(present ? 'live' : 'no-hand');
+    // 提示狀態:停止中 → 明示;否則有手 live、無手 no-hand(設計 §8)。
+    if (paused) ui.setStatus('live', '已停止演奏 — 雙手握拳繼續');
+    else ui.setStatus(present ? 'live' : 'no-hand');
   }
 
   /**
@@ -286,6 +346,11 @@ export function createApp(deps) {
       mapper.reset();
       prevL = { state: 'REST', zone: null };
       prevR = { state: 'REST', zone: null };
+      // 重置停止手勢狀態(避免重試帶舊狀態)。
+      paused = false;
+      latestBothFists = false;
+      bothFistsSince = 0;
+      pauseArmed = true;
       // 重置偵測/FPS 量測狀態,避免重試時帶舊時間戳。
       detectSeq = 0;
       lastConsumedSeq = -1;
@@ -322,6 +387,10 @@ export function createApp(deps) {
     audioEngine.setChord(null);
     audioEngine.setMelodyNote(null);
     latestTips = [];
+    paused = false;
+    latestBothFists = false;
+    bothFistsSince = 0;
+    pauseArmed = true;
   }
 
   return { start, stop, setHandFrame, applyChange };

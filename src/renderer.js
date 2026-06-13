@@ -121,6 +121,9 @@ export function createRenderer({ canvas, disks, keyboard }) {
       step,
       hue,
       sectors,
+      // 每扇形固定色:有 keyColors(melody pizza)→ 彩虹 C..B、各扇形一色;
+      // 否則 null → 用 role hue 漸層(和弦盤)。讓 pizza 跟琴鍵共用同一組彩虹色。
+      colors: Array.isArray(geom.keyColors) ? geom.keyColors : null,
       // 休息區虛線圈半徑(對齊 mockup:rIn-8)。
       restR: rIn - 8,
     };
@@ -204,8 +207,10 @@ export function createRenderer({ canvas, disks, keyboard }) {
    * @param {boolean} present 是否偵測到任何手(idle 時降低亮度)
    */
   function drawDisk(cache, ds, present, a) {
-    const { geom, sectors, hue, step, restR } = cache;
+    const { geom, sectors, hue, step, restR, colors } = cache;
     const { cx, cy, rIn, rOut, slots, color } = geom;
+    const rainbow = !!colors; // melody pizza:各扇形用彩虹固定色(跟琴鍵一致)
+    const sColor = (i) => colors[i % colors.length];
     const zone = ds && typeof ds.zone === 'number' ? ds.zone : null;
     const active = !!(ds && ds.active);
     const slotLabels = (ds && ds.slotLabels) || null;
@@ -230,11 +235,17 @@ export function createRenderer({ canvas, disks, keyboard }) {
     for (let i = 0; i < slots; i++) {
       if (i === zone) continue; // 高亮塊最後畫(疊在上層 + glow)
       const s = sectors[i];
-      const h = hue.a + (hue.b - hue.a) * (slots > 1 ? i / (slots - 1) : 0);
-      const light = i % 2 ? 30 : 38; // 交錯明度,塊界更清楚(mockup)
       ctx.beginPath();
-      ctx.fillStyle = `hsl(${h}, 60%, ${light}%)`;
-      ctx.globalAlpha = present ? 0.92 : 0.66; // idle 時整盤暗一階(設計 §8 idle 態)
+      if (rainbow) {
+        // 彩虹固定色(暗階仍顯色以利瞄準,跟琴鍵暗鍵同邏輯)。
+        ctx.fillStyle = sColor(i);
+        ctx.globalAlpha = present ? 0.62 : 0.4;
+      } else {
+        const h = hue.a + (hue.b - hue.a) * (slots > 1 ? i / (slots - 1) : 0);
+        const light = i % 2 ? 30 : 38; // 交錯明度,塊界更清楚(mockup)
+        ctx.fillStyle = `hsl(${h}, 60%, ${light}%)`;
+        ctx.globalAlpha = present ? 0.92 : 0.66; // idle 時整盤暗一階(設計 §8 idle 態)
+      }
       ctx.fill(s.path);
       ctx.globalAlpha = 1;
       // 細描邊(深色,分隔塊)
@@ -251,15 +262,20 @@ export function createRenderer({ canvas, disks, keyboard }) {
     // 2) 命中塊高亮(發光 + 白邊 + 亮填 + attack 閃光 + sustain 呼吸)
     if (zone != null) {
       const s = sectors[zone];
-      const h = hue.a + (hue.b - hue.a) * (slots > 1 ? zone / (slots - 1) : 0);
       ctx.save();
-      // glow:用該盤主色當光暈,模擬 mockup feGaussianBlur 疊圖。
+      // glow:用命中塊主色當光暈(彩虹模式 = 該音色;和弦盤 = 盤主色),
       // active 時基準較亮、再疊 attack 閃光與 sustain 呼吸,讓發聲瞬間「打一下」、持續中微微起伏。
-      ctx.shadowColor = color;
+      ctx.shadowColor = rainbow ? sColor(zone) : color;
       ctx.shadowBlur = active ? 22 + breathe * 8 + flash * 22 : 14;
-      // 命中亮度:active 飽和,attack 瞬間更白亮(往 100% 明度推),衰減後回穩。
-      const light = active ? 62 + flash * 14 : 58;
-      ctx.fillStyle = `hsl(${h}, 90%, ${light}%)`;
+      if (rainbow) {
+        // 命中扇形:該音的彩虹色爆亮 + glow(跟琴鍵發音鍵一致)。
+        ctx.fillStyle = sColor(zone);
+      } else {
+        const h = hue.a + (hue.b - hue.a) * (slots > 1 ? zone / (slots - 1) : 0);
+        // 命中亮度:active 飽和,attack 瞬間更白亮(往 100% 明度推),衰減後回穩。
+        const light = active ? 62 + flash * 14 : 58;
+        ctx.fillStyle = `hsl(${h}, 90%, ${light}%)`;
+      }
       ctx.globalAlpha = 1;
       ctx.fill(s.path);
       // 再填一次(無 shadow)讓塊體飽和、邊緣銳利
@@ -310,12 +326,12 @@ export function createRenderer({ canvas, disks, keyboard }) {
 
     // 4) 手游標(白色雙環 + 中心點 + 從中心指出的虛線)— 僅該盤有手時
     if (ds && ds.tip) {
-      drawCursor(cache, ds.tip, active);
+      drawCursor(cache, ds.tip, active, rainbow && zone != null ? sColor(zone) : null);
     }
 
     // 5) 發聲氣泡(盤上方;ACTIVE 且有 label 時,帶入場上浮 + 淡入 + glow 脈動)
     if (active && ds && ds.label) {
-      drawBubble(geom, color, ds.label, a, breathe);
+      drawBubble(geom, rainbow && zone != null ? sColor(zone) : color, ds.label, a, breathe);
     }
   }
 
@@ -524,9 +540,10 @@ export function createRenderer({ canvas, disks, keyboard }) {
    * @param {Object} cache buildDisk 結果
    * @param {{x:number,y:number}} tip 設計空間像素
    */
-  function drawCursor(cache, tip, active) {
+  function drawCursor(cache, tip, active, accent) {
     const { geom } = cache;
-    const { cx, cy, rIn, color } = geom;
+    const { cx, cy, rIn } = geom;
+    const color = accent || geom.color; // 彩虹模式發聲時 = 該音色;否則盤主色
     ctx.save();
 
     // 從中心指出的虛線:沿「圓心→游標」方向,自死區邊緣(rIn-6)畫到游標。
@@ -706,6 +723,34 @@ export function createRenderer({ canvas, disks, keyboard }) {
     drawDisk(diskCache[0], state ? state.L : null, present, anim.L);
     if (melodyKind === 'disk') drawDisk(melodyDiskCache, state ? state.R : null, present, anim.R);
     else drawKeyboard(keyboardCache, state ? state.R : null, present, anim.R);
+
+    // 停止演奏(指揮家雙手握拳):暗幕 + 中央提示,蓋在最上層。
+    if (state && state.paused) drawPausedOverlay();
+  }
+
+  /** 停止演奏覆蓋層:暗幕 + ✊ + 「已停止演奏 / 雙手握拳繼續」(設計空間置中)。 */
+  function drawPausedOverlay() {
+    const cx = DESIGN_VIEW.width / 2;
+    const cy = DESIGN_VIEW.height / 2;
+    ctx.save();
+    ctx.fillStyle = 'rgba(6, 9, 18, 0.58)';
+    ctx.fillRect(0, 0, DESIGN_VIEW.width, DESIGN_VIEW.height);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // 脈動的握拳圖示,暗示「正在停止」。
+    const pulse = 0.5 + 0.5 * Math.sin(nowMs / 480);
+    ctx.font = `${56 + pulse * 4}px ${FONT_STACK}`;
+    ctx.fillText('✊', cx, cy - 44);
+    ctx.font = `800 40px ${FONT_STACK}`;
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+    ctx.shadowBlur = 14;
+    ctx.fillText('已停止演奏', cx, cy + 18);
+    ctx.shadowBlur = 0;
+    ctx.font = `500 19px ${FONT_STACK}`;
+    ctx.fillStyle = COLORS.dim;
+    ctx.fillText('雙手握拳 → 繼續演奏', cx, cy + 58);
+    ctx.restore();
   }
 
   /** 切換右手旋律排列模式:用新幾何重建 pad 快取(draw 立即生效)。 */

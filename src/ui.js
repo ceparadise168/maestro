@@ -405,6 +405,7 @@ export function createUI({ root, onChange }) {
       h('span', { html: '👈 <b>左手</b>:指外圈一塊 = 換和弦' }),
       h('span', { html: '👉 <b>右手</b>:指到彩色音 = 彈那個音' }),
       h('span', { html: '✋ 手移到<b>鍵之間</b> = 安靜(換你唱)' }),
+      h('span', { html: '✊ <b>雙手握拳</b> = 停止 / 繼續' }),
       h('span', { html: '🎤 <b>邊唱邊伴奏</b>' }),
     );
   }

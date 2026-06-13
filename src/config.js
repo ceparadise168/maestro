@@ -262,3 +262,9 @@ export const HAND_TRACKER = {
   /** MediaPipe Hands 中食指尖的 landmark index。 */
   indexTipLandmark: 8,
 };
+
+/**
+ * 停止手勢(指揮家「雙手握拳」)需持續握拳多久(ms)才切換 停止/繼續。
+ * 加「短暫停留」門檻避免演奏中偶然握拳誤觸;放開後重新武裝,一次手勢 = 切一次(toggle)。
+ */
+export const FIST_HOLD_MS = 280;
