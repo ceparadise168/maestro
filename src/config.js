@@ -33,6 +33,13 @@ export const HYSTERESIS_DEG = 7;
 export const KEY_HYSTERESIS_PX = 8;
 
 /**
+ * 旋律 pad 的「停留確認」時間(毫秒)。手指進入新 pad 須停留 ≥ 此時間才發聲,
+ * 用來過濾「快速經過」造成的誤觸(在 pad 內時間 < 此值就掠過 → 不發聲)。
+ * 越大越不靈敏、但發聲延遲越高。取 80ms。
+ */
+export const KEY_DWELL_MS = 80;
+
+/**
  * One-Euro filter 起始參數(對食指尖座標平滑;設計 §2.3)。
  *  - minCutoff:越小越平滑(靜止抖動小),越大越跟手。
  *  - beta:速度項權重,越大快速移動越不拖。

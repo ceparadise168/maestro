@@ -28,7 +28,7 @@ import {
   radiusOf,
   keyAtPoint,
 } from './geometry.js';
-import { ONE_EURO, HYSTERESIS_DEG, KEY_HYSTERESIS_PX } from './config.js';
+import { ONE_EURO, HYSTERESIS_DEG, KEY_HYSTERESIS_PX, KEY_DWELL_MS } from './config.js';
 
 /**
  * One-Euro filter 名目取樣率(Hz),僅作為 update() 未帶實際 dt 時的後備值
@@ -252,7 +252,9 @@ function createDiskMachine(disk) {
 function createKeyboardMachine(kb) {
   const fx = createOneEuro(ONE_EURO);
   const fy = createOneEuro(ONE_EURO);
-  let zone = null; // 目前所在鍵(in-shape)= 發音鍵;null = 間隔/帶外(靜音)
+  let zone = null; // 已確認發聲的 pad(已過 dwell);null = 靜音
+  let candidate = null; // 目前所在 pad(待 dwell 確認)
+  let dwellMs = 0; // 已在 candidate 累積停留時間(ms)
   let state = 'REST';
 
   /**
@@ -268,6 +270,8 @@ function createKeyboardMachine(kb) {
       fx.reset();
       fy.reset();
       zone = null;
+      candidate = null;
+      dwellMs = 0;
       state = 'REST';
       const changed = prevState !== state || prevZone !== zone;
       return { state, zone, aim: null, changed, tip: null, present: false };
@@ -277,8 +281,7 @@ function createKeyboardMachine(kb) {
     const sy = fy.filter(tipPx.y, dt);
     const tip = { x: sx, y: sy };
 
-    // in-shape 判定 + 邊界遲滯:已在某鍵時用擴張邊界(margin)判斷是否「仍在」→ 黏住、不邊緣抖動;
-    // 否則用緊邊界重新偵測新鍵。間隔 / 帶上下外 → null(靜音)。
+    // 所在 pad:已在發聲 pad 時用擴張邊界(margin)黏住,避免邊緣抖動;否則用緊邊界重新偵測。
     let key;
     if (zone !== null && keyAtPoint(tip, kb, KEY_HYSTERESIS_PX) === zone) {
       key = zone;
@@ -286,22 +289,43 @@ function createKeyboardMachine(kb) {
       key = keyAtPoint(tip, kb, 0);
     }
 
-    if (key !== null) {
-      state = 'ACTIVE';
-      zone = key;
-    } else {
-      state = 'REST';
+    if (key === null) {
+      // 離開所有 pad → 立即靜音、清空待確認。
+      candidate = null;
+      dwellMs = 0;
       zone = null;
+      state = 'REST';
+    } else if (key === zone) {
+      // 仍在發聲中的 pad → 維持(sustain)。
+      candidate = key;
+      state = 'ACTIVE';
+    } else {
+      // 進入「非當前發聲」的 pad → 須停留 ≥ KEY_DWELL_MS 才確認(過濾快速經過)。
+      if (key === candidate) {
+        dwellMs += dt * 1000;
+      } else {
+        candidate = key;
+        dwellMs = 0;
+      }
+      if (dwellMs >= KEY_DWELL_MS) {
+        zone = candidate; // 停留夠久 → 確認發聲
+        state = 'ACTIVE';
+      } else {
+        zone = null; // 尚未停留足夠(可能只是快速經過)→ 不發新音;舊音(若有)離開時已停
+        state = 'REST';
+      }
     }
 
     const changed = prevState !== state || prevZone !== zone;
-    return { state, zone, aim: zone, changed, tip, present: true };
+    return { state, zone, aim: candidate, changed, tip, present: true };
   }
 
   function reset() {
     fx.reset();
     fy.reset();
     zone = null;
+    candidate = null;
+    dwellMs = 0;
     state = 'REST';
   }
 

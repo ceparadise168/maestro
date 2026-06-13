@@ -244,6 +244,18 @@ describe('coordinateMapper — 旋律 2D pad in-shape(§2.2 melody, 2026-06-13)'
     expect(res.R.aim).toBe(3);
   });
 
+  it('快速經過(停留 < dwell)不發聲;停留夠久才確認發聲', () => {
+    const m = createMapper({ disks: DISKS, keyboard: KEYBOARD });
+    const tip = kbInKey(3);
+    m.update([tip], DESIGN_VIEW, 1 / 60);
+    const quick = m.update([tip], DESIGN_VIEW, 1 / 60); // 累積 ~17ms < dwell 80ms
+    expect(quick.R.state).toBe('REST'); // 尚未停留足夠 → 不發聲(等同快速經過)
+    let res;
+    for (let i = 0; i < 10; i++) res = m.update([tip], DESIGN_VIEW, 1 / 60); // 累積 > dwell
+    expect(res.R.state).toBe('ACTIVE');
+    expect(res.R.zone).toBe(3);
+  });
+
   it('在 pad 之間的空白 → REST(靜音)', () => {
     const m = createMapper({ disks: DISKS, keyboard: KEYBOARD });
     const res = settle(m, [kbBetween(0, 2)]); // C 與 E 之間(上排水平空隙)
