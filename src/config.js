@@ -27,6 +27,12 @@ export const CENTER_DEADZONE_RATIO = 0.35;
 export const HYSTERESIS_DEG = 7;
 
 /**
+ * 旋律琴鍵的「水平換鍵」遲滯(設計空間像素)。瞄準鍵要換成相鄰鍵,指尖須越過鍵邊界
+ * 再多此距離才換,消除鍵邊界顫動。鍵寬約 (x1-x0)/keys ≈ 72px,取 14px。
+ */
+export const KEY_HYSTERESIS_PX = 14;
+
+/**
  * One-Euro filter 起始參數(對食指尖座標平滑;設計 §2.3)。
  *  - minCutoff:越小越平滑(靜止抖動小),越大越跟手。
  *  - beta:速度項權重,越大快速移動越不拖。
@@ -67,10 +73,9 @@ export const DESIGN_VIEW = { width: 1280, height: 720 };
 const DISK_R_OUT = 210;
 
 /**
- * 雙盤幾何。rIn 由 CENTER_DEADZONE_RATIO 導出(死區半徑 = donut 內徑),
- * 確保「視覺休息區」與「狀態機死區」完全一致。
- * 左盤(L)= 和弦(洋紅),右盤(R)= 旋律(青綠)。
- * cx/cy/rIn/rOut 皆為設計空間像素;slots 為塊數。
+ * 左盤幾何(和弦圓盤)。rIn 由 CENTER_DEADZONE_RATIO 導出(死區半徑 = donut 內徑),
+ * 確保「視覺休息區」與「狀態機死區」完全一致。cx/cy/rIn/rOut 為設計空間像素;slots 為塊數。
+ * 右手旋律不再用圓盤(改用 KEYBOARD;2026-06-13:圓盤對旋律跳音不友善 —— 沿外圈滑會刮過中間音)。
  */
 export const DISKS = {
   L: {
@@ -83,16 +88,31 @@ export const DISKS = {
     role: 'chord',
     hubLabel: 'CHORDS',
   },
-  R: {
-    cx: 950,
-    cy: 380,
-    rOut: DISK_R_OUT,
-    rIn: DISK_R_OUT * CENTER_DEADZONE_RATIO,
-    slots: SLOTS,
-    color: COLORS.melody,
-    role: 'melody',
-    hubLabel: 'MELODY',
-  },
+};
+
+/**
+ * 右手旋律「隔空琴鍵 + 演奏線」幾何(設計空間 1280×720;2026-06-13 取代圓盤)。
+ * 互動:手在「演奏線上方」水平移動 = 瞄準某鍵(不發聲);壓過線進入鍵 = 發該音;
+ * 抬回線上 = 靜音。壓下瞬間鎖定當下瞄準鍵、線下水平移動不換音(徹底消除「經過誤觸」)。
+ * 演奏線雙閾值遲滯(pressY/releaseY):壓過 pressY 才發、抬過 releaseY 才停,
+ * 中間帶不切換 → 手停在線附近不會狂發。
+ *  - x0/x1:鍵區水平範圍;keys:鍵數;keyTop/keyBottom:鍵的 y 範圍(設計空間像素)。
+ *  - lineY:演奏線 y;pressY/releaseY:發聲/靜音雙閾值(y 向下為正)。
+ *  - cx:區域中心,供「螢幕左右位置分盤」用(與左盤中線一致)。
+ */
+export const KEYBOARD = {
+  cx: 950,
+  x0: 660,
+  x1: 1240,
+  keys: SLOTS,
+  keyTop: 300,
+  keyBottom: 560,
+  lineY: 300,
+  pressY: 332,
+  releaseY: 288,
+  color: COLORS.melody,
+  role: 'melody',
+  hubLabel: 'MELODY',
 };
 
 // ───────────────────────── 樂理映射(設計 §3) ─────────────────────────

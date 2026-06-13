@@ -146,3 +146,29 @@ export function sectorPath(cx, cy, rIn, rOut, a0, a1) {
     `Z`
   );
 }
+
+// ───────────────────────── 旋律琴鍵(線性,2026-06-13) ─────────────────────────
+
+/**
+ * x 座標落在第幾個琴鍵。鍵區 [x0,x1] 等分 keys 段;夾住區外的 x(防呆)。
+ * @param {number} x 設計空間像素 x
+ * @param {{x0:number,x1:number,keys:number}} kb 琴鍵幾何(見 config.KEYBOARD)
+ * @returns {number} 鍵 index 0..keys-1
+ */
+export function keyForX(x, kb) {
+  const { x0, x1, keys } = kb;
+  if (x1 <= x0 || keys <= 0) return 0;
+  const t = (x - x0) / (x1 - x0);
+  return Math.max(0, Math.min(keys - 1, Math.floor(t * keys)));
+}
+
+/**
+ * 第 i 個琴鍵的水平邊界(設計空間像素)。供 renderer 畫鍵、mapper 換鍵遲滯用。
+ * @param {number} i 鍵 index
+ * @param {{x0:number,x1:number,keys:number}} kb 琴鍵幾何
+ * @returns {{x0:number,x1:number}} 該鍵左右界
+ */
+export function keyBoundsX(i, kb) {
+  const w = (kb.x1 - kb.x0) / kb.keys;
+  return { x0: kb.x0 + i * w, x1: kb.x0 + (i + 1) * w };
+}

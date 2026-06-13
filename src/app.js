@@ -231,6 +231,7 @@ export function createApp(deps) {
       },
       R: {
         zone: result.R.zone,
+        aim: result.R.aim,
         active: rActive,
         tip: result.R.tip,
         label: rActive ? melodyLabels[result.R.zone] : undefined,

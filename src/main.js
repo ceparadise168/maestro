@@ -10,6 +10,7 @@
 
 import {
   DISKS,
+  KEYBOARD,
   DEFAULT_KEY,
   DEFAULT_SCALE,
   BPM,
@@ -38,8 +39,8 @@ let app;
 const camera = createCamera({ video, mirror: true });
 const musicEngine = createMusicEngine({ key: DEFAULT_KEY, scale: DEFAULT_SCALE });
 const audioEngine = createAudioEngine();
-const mapper = createMapper({ disks: DISKS });
-const renderer = createRenderer({ canvas, disks: DISKS });
+const mapper = createMapper({ disks: DISKS, keyboard: KEYBOARD });
+const renderer = createRenderer({ canvas, disks: DISKS, keyboard: KEYBOARD });
 
 // handTracking 在建構時固定 onResults;轉發到 app 的 tips 緩存(設計 §5)。
 const handTracker = createHandTracker({

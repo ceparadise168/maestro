@@ -26,8 +26,10 @@ import {
   slotForAngle,
   angleMarginToBoundary,
   radiusOf,
+  keyForX,
+  keyBoundsX,
 } from './geometry.js';
-import { ONE_EURO, HYSTERESIS_DEG } from './config.js';
+import { ONE_EURO, HYSTERESIS_DEG, KEY_HYSTERESIS_PX } from './config.js';
 
 /**
  * One-Euro filter 名目取樣率(Hz),僅作為 update() 未帶實際 dt 時的後備值
@@ -100,6 +102,7 @@ function normalizedToDesign(tn, vp) {
  * @property {boolean} changed 相對上一幀「狀態或 zone」是否改變(供 diff/觸發)
  * @property {{x:number,y:number}|null} tip 平滑後該盤指尖座標(設計空間像素);無手為 null
  * @property {boolean} present 該盤是否有偵測到手
+ * @property {number|null} [aim] 旋律琴鍵的瞄準鍵(僅 keyboard machine 輸出;圓盤為 undefined)
  */
 
 /**
@@ -234,12 +237,103 @@ function createDiskMachine(disk) {
   return { step, reset };
 }
 
+// ───────────────────────── 右手旋律:琴鍵 + 演奏線狀態機(2026-06-13) ─────────────────────────
+
+/**
+ * 建立右手旋律「琴鍵 + 演奏線」狀態機,取代圓盤(解決旋律跳音刮過中間音的問題)。
+ * 輸出沿用 DiskState 形狀(state/zone/changed/tip/present)+ 額外 aim(瞄準鍵,供 renderer
+ * 預覽);因此 app 的觸發 diff 完全沿用:HOVER → state REST(不發)、PRESS → state ACTIVE(發 zone)。
+ *
+ * 機制(設計 §2.2 melody / config.KEYBOARD):
+ *  - 水平 x → 瞄準鍵 aim(keyForX + 換鍵遲滯 KEY_HYSTERESIS_PX);僅未壓下時更新。
+ *  - 垂直 y → 演奏線雙閾值:y≥pressY 壓下、y≤releaseY 抬起,中間維持(消除線附近狂發)。
+ *  - 壓下瞬間鎖定當前 aim 為發音鍵 zone;壓下期間不更新 aim → 線下水平移動不換音(無經過誤觸)。
+ * @param {Object} kb config.KEYBOARD(x0/x1/keys/lineY/pressY/releaseY…)
+ */
+function createKeyboardMachine(kb) {
+  const fx = createOneEuro(ONE_EURO);
+  const fy = createOneEuro(ONE_EURO);
+  let pressed = false; // 是否壓過演奏線(發聲中)
+  let aim = null; // 瞄準鍵 0..keys-1 | null
+  let zone = null; // 發音鍵(壓下時 = 鎖定的 aim;否則 null)
+  let state = 'REST';
+
+  /**
+   * @param {{x:number,y:number}|null} tipPx 本手指尖(像素,已分盤;null=無手)
+   * @param {number} dt 取樣間隔(s)
+   * @returns {DiskState}
+   */
+  function step(tipPx, dt) {
+    const prevState = state;
+    const prevZone = zone;
+
+    if (!tipPx) {
+      fx.reset();
+      fy.reset();
+      pressed = false;
+      aim = null;
+      zone = null;
+      state = 'REST';
+      const changed = prevState !== state || prevZone !== zone;
+      return { state, zone, aim: null, changed, tip: null, present: false };
+    }
+
+    const sx = fx.filter(tipPx.x, dt);
+    const sy = fy.filter(tipPx.y, dt);
+    const tip = { x: sx, y: sy };
+
+    // 水平瞄準鍵:僅未壓下時更新(壓下期間鎖定 → 線下平移不換音)。
+    if (!pressed) {
+      const rawKey = keyForX(sx, kb);
+      if (aim === null) {
+        aim = rawKey;
+      } else if (rawKey !== aim) {
+        // 換鍵遲滯:須越過當前鍵邊界再多 KEY_HYSTERESIS_PX 才換(設計 §2.3.2 線性版)。
+        const b = keyBoundsX(aim, kb);
+        if (sx < b.x0 - KEY_HYSTERESIS_PX || sx > b.x1 + KEY_HYSTERESIS_PX) {
+          aim = rawKey;
+        }
+      }
+    }
+
+    // 演奏線雙閾值遲滯(y 向下為正):壓過 pressY 才發、抬過 releaseY 才停。
+    if (!pressed && sy >= kb.pressY) {
+      pressed = true; // 壓下 → 鎖定當前 aim 為發音鍵
+    } else if (pressed && sy <= kb.releaseY) {
+      pressed = false;
+    }
+
+    if (pressed) {
+      state = 'ACTIVE';
+      zone = aim;
+    } else {
+      state = 'REST';
+      zone = null;
+    }
+
+    const changed = prevState !== state || prevZone !== zone;
+    return { state, zone, aim, changed, tip, present: true };
+  }
+
+  function reset() {
+    fx.reset();
+    fy.reset();
+    pressed = false;
+    aim = null;
+    zone = null;
+    state = 'REST';
+  }
+
+  return { step, reset };
+}
+
 // ───────────────────────── 工廠 ─────────────────────────
 
 /**
  * 建立座標映射器。
  * @param {Object} opts
- * @param {{L:DiskGeom, R:DiskGeom}} opts.disks 雙盤幾何(設計空間像素;見 config.DISKS)
+ * @param {{L:DiskGeom}} opts.disks 左盤(和弦圓盤)幾何(設計空間像素;見 config.DISKS)
+ * @param {Object} opts.keyboard 右手旋律琴鍵幾何(見 config.KEYBOARD)
  * @returns {{
  *   update: (tipsNormalized: Array<{x:number,y:number}>, viewport: {width:number,height:number,cameraAspect?:number}, dt?: number) => MapperResult,
  *   reset: () => void
@@ -251,9 +345,9 @@ function createDiskMachine(disk) {
  *  - viewport:盤幾何所在像素空間的尺寸(本專案 = DESIGN_VIEW);mapper 以此把 normalized 換算成像素。
  *  - 同一半若有多指,取最靠近該盤圓心者(設計 §2.1)。
  */
-export function createMapper({ disks }) {
+export function createMapper({ disks, keyboard }) {
   const machineL = createDiskMachine(disks.L);
-  const machineR = createDiskMachine(disks.R);
+  const machineR = createKeyboardMachine(keyboard);
   const fallbackDt = 1 / NOMINAL_FPS;
 
   // 中線分盤遲滯:記住每隻手「上一幀歸屬的盤」,避免手在畫面中央時於 L/R 間逐幀跳動
@@ -262,7 +356,7 @@ export function createMapper({ disks }) {
   // 注意:tips 無穩定 id,故以「最靠近哪一盤圓心」+ 中線帶狀遲滯近似(單手情境穩定;
   // 雙手交叉為設計已知取捨,§2.1)。
   let lastSide = null; // 'L' | 'R' | null(上一幀單手所在側;雙手時不適用,直接幾何分盤)
-  const SIDE_HYSTERESIS_PX = disks.L ? (disks.R.cx - disks.L.cx) * 0.06 : 40;
+  const SIDE_HYSTERESIS_PX = (keyboard.cx - disks.L.cx) * 0.06;
 
   /**
    * 把 raw normalized 指尖分到左/右盤(依畫面鏡像後的螢幕位置;同半取最靠圓心者)。
@@ -300,18 +394,19 @@ export function createMapper({ disks }) {
       return side === 'L' ? { L: pt, R: null } : { L: null, R: pt };
     }
 
-    // 多手:以「最靠近哪一盤圓心」分盤(設計 §2.1 取最靠圓心者),不套單手遲滯。
+    // 多手:依螢幕中線歸盤;左半取最靠圓心者(radiusOf),右半取最靠琴鍵區域中心 x 者
+    // (keyboard 無圓心,用 x 距)。雙手交叉為設計已知取捨(§2.1)。
     lastSide = null;
     let bestL = null;
     let bestR = null;
     let bestLdist = Infinity;
     let bestRdist = Infinity;
     for (const pt of pts) {
-      const dL = radiusOf(pt, disks.L);
-      const dR = radiusOf(pt, disks.R);
-      if (dL <= dR) {
+      if (pt.x < half) {
+        const dL = radiusOf(pt, disks.L);
         if (dL < bestLdist) { bestLdist = dL; bestL = pt; }
       } else {
+        const dR = Math.abs(pt.x - keyboard.cx);
         if (dR < bestRdist) { bestRdist = dR; bestR = pt; }
       }
     }

@@ -14,7 +14,7 @@
  * 故 renderer 不再做鏡像 —— mapper 已把 MediaPipe 原始 x 反鏡像成「畫面上看到的位置」。
  */
 
-import { polar, sectorPath } from './geometry.js';
+import { polar, sectorPath, keyBoundsX } from './geometry.js';
 import { DESIGN_VIEW, COLORS } from './config.js';
 
 /**
@@ -65,7 +65,7 @@ const FONT_STACK =
  *  - 效能:Path2D 扇形與標籤位置只在 prebuild()(建構 / resize)算一次;每幀僅做填色/描邊,
  *    不在 rAF 內重建大物件、不在 rAF 內配置陣列。
  */
-export function createRenderer({ canvas, disks }) {
+export function createRenderer({ canvas, disks, keyboard }) {
   const ctx = canvas.getContext('2d');
 
   // cover 變換參數(設計空間 → 容器 CSS 像素);resize 時更新。
@@ -90,6 +90,9 @@ export function createRenderer({ canvas, disks }) {
   // 每盤預建的靜態幾何(扇形 Path2D、標籤錨點),建構 / resize 時算一次。
   // 結構:{ key, geom, hue:{a,b}, sectors:[{path, mid, labelPos}], restR }
   const diskCache = [];
+
+  // 右手旋律琴鍵的預建幾何(buildKeyboard 結果);2026-06-13 取代圓盤。
+  let keyboardCache = null;
 
   /**
    * 預建一盤的靜態幾何(在設計空間算,draw 時統一套 cover 變換 → 不必重算)。
@@ -121,10 +124,35 @@ export function createRenderer({ canvas, disks }) {
     };
   }
 
+  /**
+   * 預建右手旋律琴鍵的靜態幾何(每鍵 rect + 標籤位置;設計空間)。2026-06-13。
+   * @param {Object} kb config.KEYBOARD
+   */
+  function buildKeyboard(kb) {
+    const { keys, keyTop, keyBottom } = kb;
+    const hue = ROLE_HUE[kb.role] || ROLE_HUE.melody;
+    const gap = 8; // 鍵間距(設計空間像素)
+    const cells = new Array(keys);
+    for (let i = 0; i < keys; i++) {
+      const b = keyBoundsX(i, kb);
+      cells[i] = {
+        i,
+        x: b.x0 + gap / 2,
+        w: b.x1 - b.x0 - gap,
+        cx: (b.x0 + b.x1) / 2,
+        top: keyTop,
+        bottom: keyBottom,
+        h: keyBottom - keyTop,
+        labelY: keyBottom - 24, // 標籤靠鍵底
+      };
+    }
+    return { kb, hue, cells, lineY: kb.lineY };
+  }
+
   function prebuild() {
     diskCache.length = 0;
     diskCache.push(buildDisk('L', disks.L));
-    diskCache.push(buildDisk('R', disks.R));
+    keyboardCache = buildKeyboard(keyboard);
   }
 
   /**
@@ -281,6 +309,210 @@ export function createRenderer({ canvas, disks }) {
     if (active && ds && ds.label) {
       drawBubble(geom, color, ds.label, a, breathe);
     }
+  }
+
+  /**
+   * 畫右手旋律琴鍵 + 演奏線 + 游標 + 氣泡(2026-06-13 取代圓盤)。
+   * 互動視覺:暗鍵 = 沒發聲;瞄準鍵(aim,hover)= 亮一階預覽;發音鍵(zone,壓下)= 爆亮 + glow。
+   * 演奏線橫貫鍵頂;游標在「線上方」空心(瞄準)、「壓下」實心發光,清楚回饋線上/線下。
+   * @param {Object} cache buildKeyboard 結果
+   * @param {DiskRenderState & {aim?:number|null}} ds 該手本幀狀態
+   * @param {boolean} present 是否偵測到任何手
+   * @param {Object} a anim.R 瞬態動畫狀態
+   */
+  function drawKeyboard(cache, ds, present, a) {
+    const { kb, hue, cells, lineY } = cache;
+    const { keys, color } = kb;
+    const zone = ds && typeof ds.zone === 'number' ? ds.zone : null; // 發音鍵(壓下)
+    const aim = ds && typeof ds.aim === 'number' ? ds.aim : null; // 瞄準鍵(hover)
+    const active = !!(ds && ds.active);
+    const slotLabels = (ds && ds.slotLabels) || null;
+    const cx = (kb.x0 + kb.x1) / 2;
+
+    // 瞬態動畫(沿用圓盤:換鍵 attack flash、氣泡入場、sustain 呼吸)
+    if (active && zone != null && (zone !== a.lastZone || !a.lastActive)) a.attackAt = nowMs;
+    if (active && zone != null && (zone !== a.bubbleZone || !a.lastActive)) {
+      a.bubbleZone = zone;
+      a.bubbleAt = nowMs;
+    }
+    a.lastZone = zone;
+    a.lastActive = active;
+    const flash = active ? Math.max(0, 1 - (nowMs - a.attackAt) / 220) : 0;
+    const breathe = active ? 0.5 + 0.5 * Math.sin(nowMs / 360) : 0;
+
+    // 1) 每個鍵
+    for (let i = 0; i < keys; i++) {
+      const c = cells[i];
+      const h = hue.a + (hue.b - hue.a) * (keys > 1 ? i / (keys - 1) : 0);
+      const isPlaying = active && i === zone;
+      const isAim = !active && i === aim; // 壓下時不再顯示瞄準預覽,避免與發音鍵混淆
+
+      ctx.save();
+      if (isPlaying) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 22 + breathe * 8 + flash * 22;
+        ctx.fillStyle = `hsl(${h}, 90%, ${62 + flash * 14}%)`;
+      } else if (isAim) {
+        ctx.fillStyle = `hsl(${h}, 70%, 52%)`; // 瞄準:亮一階預覽
+      } else {
+        ctx.fillStyle = `hsl(${h}, 55%, ${present ? (i % 2 ? 30 : 36) : 24}%)`;
+      }
+      roundRect(c.x, c.top, c.w, c.h, 10);
+      ctx.fill();
+      if (isPlaying) {
+        ctx.shadowBlur = 0;
+        ctx.fill(); // 再填飽和
+      }
+      ctx.restore();
+
+      // 邊框
+      ctx.lineWidth = isPlaying ? 3 + flash * 1.5 : isAim ? 2 : 1.5;
+      ctx.strokeStyle = isPlaying ? '#fff' : isAim ? 'rgba(255,255,255,0.7)' : 'rgba(6,9,18,0.6)';
+      roundRect(c.x, c.top, c.w, c.h, 10);
+      ctx.stroke();
+
+      // 鍵標籤(音名)
+      if (slotLabels && slotLabels[i] != null) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        if (isPlaying) {
+          ctx.font = `800 22px ${FONT_STACK}`;
+          ctx.fillStyle = '#06080f';
+        } else {
+          ctx.font = `700 17px ${FONT_STACK}`;
+          ctx.fillStyle = isAim ? '#06121a' : 'rgba(255,255,255,0.9)';
+        }
+        ctx.fillText(slotLabels[i], c.cx, c.labelY);
+        ctx.restore();
+      }
+    }
+
+    // 2) 演奏線(橫貫鍵頂;發光虛線 + MELODY 標)
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(kb.x0, lineY);
+    ctx.lineTo(kb.x1, lineY);
+    ctx.setLineDash([10, 8]);
+    ctx.lineDashOffset = -(nowMs / 80) % 18;
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 10;
+    ctx.globalAlpha = present ? 0.9 : 0.6;
+    ctx.stroke();
+    ctx.restore();
+    ctx.save();
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = color;
+    ctx.font = `800 12px ${FONT_STACK}`;
+    drawTracked(kb.hubLabel || 'MELODY', cx, lineY - 12, 2);
+    ctx.restore();
+
+    // 3) 游標(線上方=空心瞄準;壓下=實心發光)
+    if (ds && ds.tip) {
+      drawKeyboardCursor(ds.tip, active, color);
+    }
+
+    // 4) 發聲氣泡(壓下時,發音鍵上方)
+    if (active && ds && ds.label && zone != null) {
+      drawBubbleAt(cells[zone].cx, kb.keyTop - 30, color, ds.label, a, breathe);
+    }
+
+    // 5) idle 引導(無手時)
+    if (!present) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = COLORS.dim;
+      ctx.font = `600 13px ${FONT_STACK}`;
+      ctx.fillText('手移到鍵上方 → 壓過線發聲', cx, kb.keyBottom + 30);
+      ctx.restore();
+    }
+  }
+
+  /**
+   * 旋律琴鍵游標:壓下(active)=實心發光圈 + 擴散光環;線上方=空心白圈(瞄準)。
+   * @param {{x:number,y:number}} tip 設計空間像素
+   * @param {boolean} active 是否壓下發聲中
+   * @param {string} color 旋律主色
+   */
+  function drawKeyboardCursor(tip, active, color) {
+    ctx.save();
+    if (active) {
+      const t = (nowMs / 700) % 1; // 擴散光環
+      const ringR = 26 + t * 20;
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, ringR, 0, Math.PI * 2);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = (1 - t) * 0.7;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // 外環
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, 26, 0, Math.PI * 2);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = active ? color : 'rgba(255,255,255,0.95)';
+    if (active) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 14;
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // 內圈(壓下實心、hover 半透明)
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, 14, 0, Math.PI * 2);
+    ctx.globalAlpha = active ? 0.9 : 1;
+    ctx.fillStyle = active ? color : 'rgba(255,255,255,0.2)';
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#fff';
+    ctx.stroke();
+    // 中心點
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = active ? '#06080f' : '#fff';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /**
+   * 在指定中心畫發聲氣泡(膠囊 + glow + 深色字),帶入場上浮淡入。drawBubble 的通用版。
+   * @param {number} cx 氣泡中心 x(設計空間)
+   * @param {number} by0 氣泡中心 y 基準(設計空間)
+   * @param {string} color 主色
+   * @param {string} text 文字
+   * @param {Object} a anim 狀態(取 bubbleAt)
+   * @param {number} breathe sustain 呼吸量(0..1)
+   */
+  function drawBubbleAt(cx, by0, color, text, a, breathe) {
+    const t = Math.min(1, (nowMs - a.bubbleAt) / 180);
+    const ease = 1 - (1 - t) * (1 - t);
+    const by = by0 + (1 - ease) * 10;
+    const scale = 0.86 + ease * 0.14;
+    const w = 120;
+    const h = 42;
+    const r = 21;
+    ctx.save();
+    ctx.globalAlpha = ease;
+    ctx.translate(cx, by);
+    ctx.scale(scale, scale);
+    ctx.translate(-cx, -by);
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 16 + breathe * 8;
+    ctx.fillStyle = color;
+    roundRect(cx - w / 2, by - h / 2, w, h, r);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fill();
+    ctx.fillStyle = '#06080f';
+    ctx.font = `800 19px ${FONT_STACK}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, cx, by);
+    ctx.restore();
   }
 
   /**
@@ -488,9 +720,9 @@ export function createRenderer({ canvas, disks }) {
     applyTransform();
 
     const present = !!(state && state.present);
-    // 左盤(和弦)、右盤(旋律)
+    // 左盤(和弦圓盤)、右手(旋律琴鍵)
     drawDisk(diskCache[0], state ? state.L : null, present, anim.L);
-    drawDisk(diskCache[1], state ? state.R : null, present, anim.R);
+    drawKeyboard(keyboardCache, state ? state.R : null, present, anim.R);
   }
 
   // 建構即預建幾何 + 量一次尺寸(若 canvas 已在 DOM)。

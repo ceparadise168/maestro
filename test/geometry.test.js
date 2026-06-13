@@ -11,7 +11,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as geometry from '../src/geometry.js';
-import { polar, radiusOf, angleOf, slotForAngle, isInDeadzone, angleMarginToBoundary, sectorPath } from '../src/geometry.js';
+import { polar, radiusOf, angleOf, slotForAngle, isInDeadzone, angleMarginToBoundary, sectorPath, keyForX, keyBoundsX } from '../src/geometry.js';
 
 // 浮點容差輔助
 const close = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
@@ -313,5 +313,41 @@ describe('sectorPath — donut 扇形 path(錨點 = polar 輸出)', () => {
     const m = d.match(/A\s+[\d.]+\s+[\d.]+\s+0\s+(\d)\s+\d/);
     expect(m).not.toBeNull();
     expect(m[1]).toBe('1');
+  });
+});
+
+describe('keyForX / keyBoundsX — 旋律琴鍵線性對位(2026-06-13)', () => {
+  const KB = { x0: 660, x1: 1240, keys: 8 };
+  const w = (KB.x1 - KB.x0) / KB.keys; // 72.5
+
+  it('鍵區左緣 → 鍵 0,右緣內側 → 最後一鍵', () => {
+    expect(keyForX(KB.x0 + 1, KB)).toBe(0);
+    expect(keyForX(KB.x1 - 1, KB)).toBe(7);
+  });
+
+  it('每個鍵中央 x → 對應鍵 index', () => {
+    for (let i = 0; i < KB.keys; i++) {
+      expect(keyForX(KB.x0 + (i + 0.5) * w, KB)).toBe(i);
+    }
+  });
+
+  it('區外的 x 夾住到端點鍵(防呆)', () => {
+    expect(keyForX(KB.x0 - 500, KB)).toBe(0);
+    expect(keyForX(KB.x1 + 500, KB)).toBe(7);
+  });
+
+  it('keyBoundsX 連續不重疊、涵蓋整個鍵區', () => {
+    expect(keyBoundsX(0, KB).x0).toBeCloseTo(KB.x0);
+    expect(keyBoundsX(KB.keys - 1, KB).x1).toBeCloseTo(KB.x1);
+    for (let i = 1; i < KB.keys; i++) {
+      expect(keyBoundsX(i, KB).x0).toBeCloseTo(keyBoundsX(i - 1, KB).x1);
+    }
+  });
+
+  it('keyForX(鍵中央) 與 keyBoundsX 自洽', () => {
+    for (let i = 0; i < KB.keys; i++) {
+      const b = keyBoundsX(i, KB);
+      expect(keyForX((b.x0 + b.x1) / 2, KB)).toBe(i);
+    }
   });
 });
