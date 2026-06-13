@@ -11,7 +11,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as geometry from '../src/geometry.js';
-import { polar, radiusOf, angleOf, slotForAngle, isInDeadzone, angleMarginToBoundary, sectorPath, keyForX, keyBoundsX, keyRect, keyAtPoint } from '../src/geometry.js';
+import { polar, radiusOf, angleOf, slotForAngle, isInDeadzone, angleMarginToBoundary, sectorPath, keyRect, keyAtPoint } from '../src/geometry.js';
 
 // 浮點容差輔助
 const close = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
@@ -316,81 +316,51 @@ describe('sectorPath — donut 扇形 path(錨點 = polar 輸出)', () => {
   });
 });
 
-describe('keyForX / keyBoundsX — 旋律琴鍵線性對位(2026-06-13)', () => {
-  const KB = { x0: 660, x1: 1240, keys: 8 };
-  const w = (KB.x1 - KB.x0) / KB.keys; // 72.5
+describe('keyRect / keyAtPoint — 2D 三度排列 in-shape(2026-06-13)', () => {
+  // 簡化 fixture:上排 2 顆(col 0,1)、下排 1 顆(col0,錯半格)
+  const KB = {
+    layout: [
+      { row: 0, col: 0 }, // 0 上排左
+      { row: 1, col: 0 }, // 1 下排(錯半格)
+      { row: 0, col: 1 }, // 2 上排右
+    ],
+    originX: 700,
+    colStep: 150,
+    rowOffsetX: 75,
+    topY: 250,
+    rowStep: 150,
+    padW: 100,
+    padH: 100,
+  };
 
-  it('鍵區左緣 → 鍵 0,右緣內側 → 最後一鍵', () => {
-    expect(keyForX(KB.x0 + 1, KB)).toBe(0);
-    expect(keyForX(KB.x1 - 1, KB)).toBe(7);
+  it('keyRect 由 2D layout 算出位置(上排 row0、下排 row1 錯半格)', () => {
+    expect(keyRect(0, KB)).toEqual({ x: 700, y: 250, w: 100, h: 100 }); // 上排 col0
+    expect(keyRect(2, KB)).toEqual({ x: 850, y: 250, w: 100, h: 100 }); // 上排 col1
+    expect(keyRect(1, KB)).toEqual({ x: 775, y: 400, w: 100, h: 100 }); // 下排 col0,錯半格
   });
 
-  it('每個鍵中央 x → 對應鍵 index', () => {
-    for (let i = 0; i < KB.keys; i++) {
-      expect(keyForX(KB.x0 + (i + 0.5) * w, KB)).toBe(i);
-    }
-  });
-
-  it('區外的 x 夾住到端點鍵(防呆)', () => {
-    expect(keyForX(KB.x0 - 500, KB)).toBe(0);
-    expect(keyForX(KB.x1 + 500, KB)).toBe(7);
-  });
-
-  it('keyBoundsX 連續不重疊、涵蓋整個鍵區', () => {
-    expect(keyBoundsX(0, KB).x0).toBeCloseTo(KB.x0);
-    expect(keyBoundsX(KB.keys - 1, KB).x1).toBeCloseTo(KB.x1);
-    for (let i = 1; i < KB.keys; i++) {
-      expect(keyBoundsX(i, KB).x0).toBeCloseTo(keyBoundsX(i - 1, KB).x1);
-    }
-  });
-
-  it('keyForX(鍵中央) 與 keyBoundsX 自洽', () => {
-    for (let i = 0; i < KB.keys; i++) {
-      const b = keyBoundsX(i, KB);
-      expect(keyForX((b.x0 + b.x1) / 2, KB)).toBe(i);
-    }
-  });
-});
-
-describe('keyRect / keyAtPoint — in-shape 判定(2026-06-13)', () => {
-  const KB = { x0: 664, x1: 1236, keys: 7, gap: 30, keyTop: 312, keyBottom: 452 };
-  const midY = (KB.keyTop + KB.keyBottom) / 2;
-
-  it('keyRect 內縮 gap、y 落在帶高範圍', () => {
-    const r = keyRect(0, KB);
-    const segW = (KB.x1 - KB.x0) / KB.keys;
-    expect(r.x).toBeCloseTo(KB.x0 + KB.gap / 2);
-    expect(r.w).toBeCloseTo(segW - KB.gap);
-    expect(r.y).toBe(KB.keyTop);
-    expect(r.h).toBe(KB.keyBottom - KB.keyTop);
-  });
-
-  it('鍵中央(帶內)→ 該鍵', () => {
-    for (let i = 0; i < KB.keys; i++) {
+  it('pad 中心 → 該 pad', () => {
+    for (let i = 0; i < KB.layout.length; i++) {
       const r = keyRect(i, KB);
-      expect(keyAtPoint({ x: r.x + r.w / 2, y: midY }, KB)).toBe(i);
+      expect(keyAtPoint({ x: r.x + r.w / 2, y: r.y + r.h / 2 }, KB)).toBe(i);
     }
   });
 
-  it('鍵間「間隔」→ null(靜音)', () => {
-    const segW = (KB.x1 - KB.x0) / KB.keys;
-    for (let i = 0; i < KB.keys - 1; i++) {
-      const gapX = KB.x0 + (i + 1) * segW; // 段邊界 = 間隔中心
-      expect(keyAtPoint({ x: gapX, y: midY }, KB)).toBe(null);
-    }
+  it('pad 之間的空白 / 上方 → null(靜音)', () => {
+    expect(keyAtPoint({ x: 825, y: 300 }, KB)).toBe(null); // 上排 pad0/pad2 之間
+    expect(keyAtPoint({ x: 750, y: 200 }, KB)).toBe(null); // 所有 pad 上方
   });
 
-  it('帶「上方 / 下方」外側 → null(靜音,供抬手跳音)', () => {
-    const r = keyRect(3, KB);
-    const cx = r.x + r.w / 2;
-    expect(keyAtPoint({ x: cx, y: KB.keyTop - 30 }, KB)).toBe(null);
-    expect(keyAtPoint({ x: cx, y: KB.keyBottom + 30 }, KB)).toBe(null);
+  it('同排三度水平移動不經過第三個 pad(pad0 → pad2 的路徑上是空隙,非下排 pad1)', () => {
+    // pad0 中心(750,300)→ pad2 中心(900,300),沿 y=300;下排 pad1 在 y 400-500,不在此線上
+    expect(keyAtPoint({ x: 825, y: 300 }, KB)).toBe(null); // 中點在空隙、且不碰下排
   });
 
-  it('margin(遲滯)把鍵邊界外擴:剛出鍵緣 6px,margin 10 仍算在鍵內', () => {
-    const r = keyRect(2, KB);
-    const justOutX = r.x + r.w + 6; // 鍵右緣外 6px(仍在間隔內)
+  it('margin(遲滯)把 pad 邊界外擴', () => {
+    const r = keyRect(0, KB);
+    const justOutX = r.x + r.w + 4; // 右緣外 4px
+    const midY = r.y + r.h / 2;
     expect(keyAtPoint({ x: justOutX, y: midY }, KB)).toBe(null); // 緊邊界:不在
-    expect(keyAtPoint({ x: justOutX, y: midY }, KB, 10)).toBe(2); // margin 10:黏住鍵 2
+    expect(keyAtPoint({ x: justOutX, y: midY }, KB, 8)).toBe(0); // margin 8:黏住 pad0
   });
 });

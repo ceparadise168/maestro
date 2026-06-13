@@ -19,7 +19,7 @@
 import { describe, it, expect } from 'vitest';
 import { createMapper } from '../src/coordinateMapper.js';
 import { DISKS, KEYBOARD, DESIGN_VIEW, SLOTS, HYSTERESIS_DEG } from '../src/config.js';
-import { polar, keyBoundsX } from '../src/geometry.js';
+import { polar, keyRect } from '../src/geometry.js';
 
 const W = DESIGN_VIEW.width;
 const H = DESIGN_VIEW.height;
@@ -31,26 +31,26 @@ function tipAt(disk, deg, r) {
   return { x: 1 - p.x / W, y: p.y / H };     // 反鏡像 → raw normalized
 }
 
-/** 旋律琴鍵第 k 鍵中央 x(設計空間像素)。 */
-function keyCenterX(k) {
-  const b = keyBoundsX(k, KEYBOARD);
-  return (b.x0 + b.x1) / 2;
+/** 第 i 個 pad 中心(設計空間像素)。 */
+function padCenter(i) {
+  const r = keyRect(i, KEYBOARD);
+  return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
-/** 琴鍵帶垂直中線 y(設計空間像素)。 */
-const kbMidY = (KEYBOARD.keyTop + KEYBOARD.keyBottom) / 2;
-/** 在第 k 鍵「形狀內」(in-shape 發聲)→ 未鏡像 raw normalized。 */
-function kbInKey(k) {
-  return { x: 1 - keyCenterX(k) / W, y: kbMidY / H };
+/** 在第 i 個 pad 形狀內(in-shape 發聲)→ 未鏡像 raw normalized。 */
+function kbInKey(i) {
+  const c = padCenter(i);
+  return { x: 1 - c.x / W, y: c.y / H };
 }
-/** 在第 k 鍵右側「間隔」(靜音)→ 未鏡像 raw normalized。 */
-function kbInGap(k) {
-  const segW = (KEYBOARD.x1 - KEYBOARD.x0) / KEYBOARD.keys;
-  const px = KEYBOARD.x0 + (k + 1) * segW; // 段邊界 = 間隔中心
-  return { x: 1 - px / W, y: kbMidY / H };
+/** 兩 pad 中心連線中點(落在 pad 之間的靜音空白)→ 未鏡像 raw normalized。 */
+function kbBetween(i, j) {
+  const a = padCenter(i);
+  const b = padCenter(j);
+  return { x: 1 - ((a.x + b.x) / 2) / W, y: ((a.y + b.y) / 2) / H };
 }
-/** 在第 k 鍵「上方帶外」(靜音,供抬手跳音)→ 未鏡像 raw normalized。 */
-function kbAboveBand(k) {
-  return { x: 1 - keyCenterX(k) / W, y: (KEYBOARD.keyTop - 40) / H };
+/** 在所有 pad 上方(靜音)→ 未鏡像 raw normalized。 */
+function kbAbove() {
+  const c = padCenter(0);
+  return { x: 1 - c.x / W, y: (KEYBOARD.topY - 60) / H };
 }
 
 /** slot k 的角度中心(度)。 */
@@ -234,8 +234,8 @@ describe('coordinateMapper — left/right disk split (§2.1, mirrored view)', ()
   });
 });
 
-describe('coordinateMapper — 旋律琴鍵 in-shape(§2.2 melody, 2026-06-13)', () => {
-  it('在某鍵形狀內 → ACTIVE、zone = 該鍵、aim = 該鍵', () => {
+describe('coordinateMapper — 旋律 2D pad in-shape(§2.2 melody, 2026-06-13)', () => {
+  it('在某 pad 形狀內 → ACTIVE、zone = 該 pad、aim = 該 pad', () => {
     const m = createMapper({ disks: DISKS, keyboard: KEYBOARD });
     const res = settle(m, [kbInKey(3)]);
     expect(res.R.present).toBe(true);
@@ -244,25 +244,25 @@ describe('coordinateMapper — 旋律琴鍵 in-shape(§2.2 melody, 2026-06-13)',
     expect(res.R.aim).toBe(3);
   });
 
-  it('在鍵間「間隔」→ REST(靜音)', () => {
+  it('在 pad 之間的空白 → REST(靜音)', () => {
     const m = createMapper({ disks: DISKS, keyboard: KEYBOARD });
-    const res = settle(m, [kbInGap(2)]); // 鍵 2 與鍵 3 之間
+    const res = settle(m, [kbBetween(0, 2)]); // C 與 E 之間(上排水平空隙)
     expect(res.R.present).toBe(true);
     expect(res.R.state).toBe('REST');
     expect(res.R.zone).toBe(null);
   });
 
-  it('在鍵帶「上方外側」→ REST(靜音,供抬手跳音)', () => {
+  it('在所有 pad 上方 → REST(靜音)', () => {
     const m = createMapper({ disks: DISKS, keyboard: KEYBOARD });
-    const res = settle(m, [kbAboveBand(4)]);
+    const res = settle(m, [kbAbove()]);
     expect(res.R.state).toBe('REST');
     expect(res.R.zone).toBe(null);
   });
 
-  it('鍵 → 間隔 → 相鄰鍵:中途間隔靜音、抵達才換音(無經過誤觸)', () => {
+  it('pad → 空白 → 相鄰 pad:中途靜音、抵達才換音(無經過誤觸)', () => {
     const m = createMapper({ disks: DISKS, keyboard: KEYBOARD });
     expect(settle(m, [kbInKey(2)]).R.zone).toBe(2);
-    expect(settle(m, [kbInGap(2)]).R.state).toBe('REST');
+    expect(settle(m, [kbBetween(2, 3)]).R.state).toBe('REST');
     expect(settle(m, [kbInKey(3)]).R.zone).toBe(3);
   });
 

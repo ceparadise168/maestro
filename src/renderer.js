@@ -325,7 +325,7 @@ export function createRenderer({ canvas, disks, keyboard }) {
     const zone = ds && typeof ds.zone === 'number' ? ds.zone : null; // in-shape 發音鍵
     const active = !!(ds && ds.active);
     const slotLabels = (ds && ds.slotLabels) || null;
-    const cx = (kb.x0 + kb.x1) / 2;
+    const cx = kb.cx;
 
     // 瞬態動畫(換鍵 attack flash、氣泡入場、sustain 呼吸)
     if (active && zone != null && (zone !== a.lastZone || !a.lastActive)) a.attackAt = nowMs;
@@ -388,7 +388,7 @@ export function createRenderer({ canvas, disks, keyboard }) {
 
     // 發聲氣泡(發音鍵上方)
     if (active && ds && ds.label && zone != null) {
-      drawBubbleAt(cells[zone].cx, kb.keyTop - 30, cells[zone].color, ds.label, a, breathe);
+      drawBubbleAt(cells[zone].cx, cells[zone].top - 26, cells[zone].color, ds.label, a, breathe);
     }
 
     // idle 引導(無手時)
@@ -397,7 +397,7 @@ export function createRenderer({ canvas, disks, keyboard }) {
       ctx.textAlign = 'center';
       ctx.fillStyle = COLORS.dim;
       ctx.font = `600 13px ${FONT_STACK}`;
-      ctx.fillText('手指到彩色音柱就響,移到柱間空隙就停', cx, kb.keyBottom + 32);
+      ctx.fillText('手指到彩色音就響,移到鍵之間就停', cx, kb.topY + kb.rowStep + kb.padH + 32);
       ctx.restore();
     }
   }

@@ -147,60 +147,41 @@ export function sectorPath(cx, cy, rIn, rOut, a0, a1) {
   );
 }
 
-// ───────────────────────── 旋律琴鍵(線性,2026-06-13) ─────────────────────────
+// ───────────────────────── 旋律琴鍵(2D 三度排列,2026-06-13) ─────────────────────────
 
 /**
- * x 座標落在第幾個琴鍵。鍵區 [x0,x1] 等分 keys 段;夾住區外的 x(防呆)。
- * @param {number} x 設計空間像素 x
- * @param {{x0:number,x1:number,keys:number}} kb 琴鍵幾何(見 config.KEYBOARD)
- * @returns {number} 鍵 index 0..keys-1
- */
-export function keyForX(x, kb) {
-  const { x0, x1, keys } = kb;
-  if (x1 <= x0 || keys <= 0) return 0;
-  const t = (x - x0) / (x1 - x0);
-  return Math.max(0, Math.min(keys - 1, Math.floor(t * keys)));
-}
-
-/**
- * 第 i 個琴鍵的水平邊界(設計空間像素)。供 renderer 畫鍵、mapper 換鍵遲滯用。
- * @param {number} i 鍵 index
- * @param {{x0:number,x1:number,keys:number}} kb 琴鍵幾何
- * @returns {{x0:number,x1:number}} 該鍵左右界
- */
-export function keyBoundsX(i, kb) {
-  const w = (kb.x1 - kb.x0) / kb.keys;
-  return { x0: kb.x0 + i * w, x1: kb.x0 + (i + 1) * w };
-}
-
-/**
- * 第 i 個琴鍵的「視覺矩形」(等分後內縮 gap;設計空間像素)。in-shape 判定與 renderer 共用同一形狀。
- * @param {number} i 鍵 index
- * @param {{x0:number,x1:number,keys:number,gap:number,keyTop:number,keyBottom:number}} kb
- * @returns {{x:number,y:number,w:number,h:number}} 鍵矩形
+ * 第 i 個 pad 的視覺矩形(由 config.KEYBOARD 的 2D layout 算出;設計空間像素)。
+ * in-shape 判定與 renderer 共用同一形狀。上排 row0、下排 row1(錯半格 rowOffsetX)。
+ * @param {number} i pad index(0..keys-1)
+ * @param {Object} kb config.KEYBOARD(layout/originX/colStep/rowOffsetX/topY/rowStep/padW/padH)
+ * @returns {{x:number,y:number,w:number,h:number}} pad 矩形
  */
 export function keyRect(i, kb) {
-  const segW = (kb.x1 - kb.x0) / kb.keys;
-  const half = kb.gap / 2;
-  return { x: kb.x0 + i * segW + half, y: kb.keyTop, w: segW - kb.gap, h: kb.keyBottom - kb.keyTop };
+  const { row, col } = kb.layout[i];
+  const x = kb.originX + (row === 1 ? kb.rowOffsetX : 0) + col * kb.colStep;
+  const y = kb.topY + row * kb.rowStep;
+  return { x, y, w: kb.padW, h: kb.padH };
 }
 
 /**
- * 點落在哪個琴鍵形狀內(in-shape 機制核心):手在某鍵矩形內 → 該鍵;在間隔 / 帶上下外 → null(靜音)。
- * margin>0 供遲滯用(已在某鍵時擴張其邊界,避免邊緣抖動進出)。鍵間 gap > 2×margin 確保不會同時屬於兩鍵。
+ * 點落在哪個 pad 形狀內(in-shape 機制核心):手在某 pad 矩形內 → 該音;在 pad 之間 / 之外 → null(靜音)。
+ * margin>0 供遲滯用(已在某 pad 時擴張其邊界,避免邊緣抖動進出)。逐 pad 檢查 2D layout,回傳第一個命中。
  * @param {{x:number,y:number}} pt 點(設計空間像素)
  * @param {Object} kb config.KEYBOARD
  * @param {number} [margin=0] 邊界外擴(像素)
- * @returns {number|null} 鍵 index 或 null
+ * @returns {number|null} pad index 或 null
  */
 export function keyAtPoint(pt, kb, margin = 0) {
-  if (pt.y < kb.keyTop - margin || pt.y > kb.keyBottom + margin) return null;
-  const segW = (kb.x1 - kb.x0) / kb.keys;
-  const half = kb.gap / 2;
-  for (let i = 0; i < kb.keys; i++) {
-    const kx0 = kb.x0 + i * segW + half;
-    const kx1 = kb.x0 + (i + 1) * segW - half;
-    if (pt.x >= kx0 - margin && pt.x <= kx1 + margin) return i;
+  for (let i = 0; i < kb.layout.length; i++) {
+    const r = keyRect(i, kb);
+    if (
+      pt.x >= r.x - margin &&
+      pt.x <= r.x + r.w + margin &&
+      pt.y >= r.y - margin &&
+      pt.y <= r.y + r.h + margin
+    ) {
+      return i;
+    }
   }
   return null;
 }
