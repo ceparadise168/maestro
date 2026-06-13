@@ -39,7 +39,7 @@ export const KEY_HYSTERESIS_PX = 8;
  *  - SAME:重觸「同一」音(剛離開又回來)→ 較短,讓連打同音跟手。
  * 越大越不靈敏、發聲延遲越高;可由 UI 即時調整(見 DWELL_LEVELS)。
  */
-export const KEY_DWELL_DIFF_MS = 80;
+export const KEY_DWELL_DIFF_MS = 150; // 預設「鈍」(= 滑桿 55%);換不同音較不靈敏、過濾掃過
 export const KEY_DWELL_SAME_MS = 30;
 
 /**
@@ -127,7 +127,7 @@ export const KEYBOARD = {
   color: COLORS.melody,
   role: 'melody',
   hubLabel: 'MELODY',
-  defaultMode: 'thirds',
+  defaultMode: 'row', // 預設「鍵盤」單排;三度 / 披薩 可由 UI 切換
   modes: {
     // 2D 三度排列:上排 C E G B(0,2,4,6)、下排錯半格 D F A(1,3,5)
     thirds: {

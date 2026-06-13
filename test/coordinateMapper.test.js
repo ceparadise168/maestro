@@ -249,7 +249,7 @@ describe('coordinateMapper — 旋律 2D pad in-shape(§2.2 melody, 2026-06-13)'
     const m = createMapper({ disks: DISKS, keyboard: MEL });
     const tip = kbInKey(3);
     m.update([tip], DESIGN_VIEW, 1 / 60);
-    const quick = m.update([tip], DESIGN_VIEW, 1 / 60); // 累積 ~17ms < dwell 80ms
+    const quick = m.update([tip], DESIGN_VIEW, 1 / 60); // 累積 ~33ms < 預設換音 dwell 150ms
     expect(quick.R.state).toBe('REST'); // 尚未停留足夠 → 不發聲(等同快速經過)
     let res;
     for (let i = 0; i < 10; i++) res = m.update([tip], DESIGN_VIEW, 1 / 60); // 累積 > dwell
@@ -329,7 +329,7 @@ describe('coordinateMapper — 旋律 pizza 圓盤模式(kind:disk, 扇形 + 中
     const m = createMapper({ disks: DISKS, keyboard: PIZZA });
     const tip = sector(3);
     m.update([tip], DESIGN_VIEW, 1 / 60);
-    const quick = m.update([tip], DESIGN_VIEW, 1 / 60); // 累積 ~17ms < dwell 80ms
+    const quick = m.update([tip], DESIGN_VIEW, 1 / 60); // 累積 ~33ms < 預設換音 dwell 150ms
     expect(quick.R.state).toBe('REST');
     let res;
     for (let i = 0; i < 10; i++) res = m.update([tip], DESIGN_VIEW, 1 / 60); // 累積 > dwell
