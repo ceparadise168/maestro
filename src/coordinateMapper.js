@@ -164,12 +164,20 @@ function createOneEuro({ minCutoff, beta, dCutoff }) {
 /**
  * 建立單盤的狀態 + 平滑記憶。封裝 One-Euro(x/y)、上一幀 state/zone。
  * @param {DiskGeom} disk 盤幾何(像素)
+ * @param {{diffMs:number,sameMs:number}} [dwell] 兩段停留靈敏度。
+ *   - 不傳(和弦盤):指到扇形「立即」發聲(原行為)。
+ *   - 傳入(melody pizza):套用跟琴鍵同款的兩段 dwell,過濾「快速掃過扇形」的誤觸;
+ *     換不同音用 diffMs、同音重觸用 sameMs。讓三種旋律排列(三度/鍵盤/披薩)靈敏度一致。
  */
-function createDiskMachine(disk) {
+function createDiskMachine(disk, dwell) {
   const fx = createOneEuro(ONE_EURO);
   const fy = createOneEuro(ONE_EURO);
   let state = 'REST'; // 'REST' | 'ACTIVE'
-  let zone = null; // 0..slots-1 | null
+  let zone = null; // 已確認發聲的扇形 0..slots-1 | null
+  // 以下三者僅 dwell 模式(pizza)使用;和弦盤(無 dwell)永遠 candidate=null。
+  let candidate = null; // 目前指向的扇形(待 dwell 確認)
+  let dwellMs = 0; // 已在 candidate 累積停留(ms)
+  let lastPlayed = null; // 上一個確認發聲過的扇形(跨靜音記憶;判斷「同音重觸」)
 
   /**
    * 推進一幀。
@@ -187,8 +195,10 @@ function createDiskMachine(disk) {
       fy.reset();
       state = 'REST';
       zone = null;
+      candidate = null;
+      dwellMs = 0;
       const changed = prevState !== state || prevZone !== zone;
-      return { state, zone, changed, tip: null, present: false };
+      return { state, zone, aim: null, changed, tip: null, present: false };
     }
 
     // 平滑(設計空間像素)
@@ -200,7 +210,10 @@ function createDiskMachine(disk) {
       // 回中心死區 → REST(設計 §2.2)。
       state = 'REST';
       zone = null;
-    } else {
+      candidate = null;
+      dwellMs = 0;
+    } else if (!dwell) {
+      // ── 和弦盤:無 dwell,指到扇形立即發聲(原行為,逐字保留) ──
       const deg = angleOf(tip, disk);
       const rawZone = slotForAngle(deg, disk.slots);
       if (state === 'REST' || zone === null) {
@@ -220,10 +233,41 @@ function createDiskMachine(disk) {
         // 否則黏在原塊(消除邊界顫動)。
         state = 'ACTIVE';
       }
+    } else {
+      // ── melody pizza:套用兩段 dwell(跟琴鍵同款,過濾快速掃過扇形) ──
+      const deg = angleOf(tip, disk);
+      // 扇形邊界遲滯:已發聲扇形用 overshoot 黏住,否則認原始扇形(消除邊界顫動)。
+      let sect = slotForAngle(deg, disk.slots);
+      if (zone !== null && sect !== zone) {
+        const overshoot = angleMarginToBoundary(deg, zone, disk.slots);
+        if (overshoot <= HYSTERESIS_DEG) sect = zone;
+      }
+      if (sect === zone) {
+        // 仍在發聲扇形 → 維持(sustain)。
+        candidate = sect;
+        state = 'ACTIVE';
+      } else {
+        // 進入「非當前發聲」扇形 → 須停留夠久才確認(過濾快速經過)。
+        if (sect === candidate) {
+          dwellMs += dt * 1000;
+        } else {
+          candidate = sect;
+          dwellMs = 0;
+        }
+        const threshold = candidate === lastPlayed ? dwell.sameMs : dwell.diffMs;
+        if (dwellMs >= threshold) {
+          zone = candidate; // 停留夠久 → 確認發聲
+          lastPlayed = candidate;
+          state = 'ACTIVE';
+        } else {
+          zone = null; // 尚未停留足夠(可能只是快速掃過)→ 不發新音
+          state = 'REST';
+        }
+      }
     }
 
     const changed = prevState !== state || prevZone !== zone;
-    return { state, zone, changed, tip, present: true };
+    return { state, zone, aim: candidate, changed, tip, present: true };
   }
 
   function reset() {
@@ -231,6 +275,9 @@ function createDiskMachine(disk) {
     fy.reset();
     state = 'REST';
     zone = null;
+    candidate = null;
+    dwellMs = 0;
+    lastPlayed = null;
   }
 
   return { step, reset };
@@ -359,9 +406,10 @@ export function createMapper({ disks, keyboard }) {
   const machineL = createDiskMachine(disks.L);
   let kbGeom = keyboard; // 可在執行期換排列模式(thirds / row / pizza)
   const dwell = { diffMs: KEY_DWELL_DIFF_MS, sameMs: KEY_DWELL_SAME_MS }; // 兩段靈敏度(setDwell 可調)
-  // pizza(kind:'disk')用和弦盤同款扇形 + 中心休息區機制;thirds/row(pads)用 in-shape + dwell。
+  // pizza(kind:'disk')用和弦盤同款扇形 + 中心休息區,但「帶 dwell」=> 三種旋律排列靈敏度一致;
+  // thirds/row(pads)用 in-shape + dwell。和弦盤(machineL)不帶 dwell = 立即發聲。
   const buildMelodyMachine = (kb) =>
-    kb.kind === 'disk' ? createDiskMachine(kb) : createKeyboardMachine(kb, dwell);
+    kb.kind === 'disk' ? createDiskMachine(kb, dwell) : createKeyboardMachine(kb, dwell);
   let machineR = buildMelodyMachine(kbGeom);
   const fallbackDt = 1 / NOMINAL_FPS;
 

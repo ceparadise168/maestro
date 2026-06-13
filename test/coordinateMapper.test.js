@@ -309,19 +309,44 @@ describe('coordinateMapper — 旋律 2D pad in-shape(§2.2 melody, 2026-06-13)'
   });
 });
 
-describe('coordinateMapper — 旋律 pizza 圓盤模式(kind:disk, 跟和弦一樣)', () => {
+describe('coordinateMapper — 旋律 pizza 圓盤模式(kind:disk, 扇形 + 中心休息 + dwell)', () => {
   const PIZZA = melodyGeom('pizza');
   const midRp = (PIZZA.rIn + PIZZA.rOut) / 2;
   const step7 = 360 / PIZZA.slots;
+  const sector = (k) => tipAt(PIZZA, step7 * k + step7 / 2, midRp); // 扇形 k 中心
 
-  it('指向某扇形 → ACTIVE 該音;回中心死區 → REST(無 dwell,跟和弦盤一致)', () => {
+  it('停留扇形夠久 → ACTIVE 該音;回中心死區 → REST', () => {
     const m = createMapper({ disks: DISKS, keyboard: PIZZA });
-    const out = settle(m, [tipAt(PIZZA, step7 * 3 + step7 / 2, midRp)]); // 扇形 3(F)
+    const out = settle(m, [sector(3)]); // 扇形 3(F),settle 200ms > dwell
     expect(out.R.state).toBe('ACTIVE');
     expect(out.R.zone).toBe(3);
     const center = settle(m, [tipAt(PIZZA, 0, PIZZA.rIn * 0.4)]); // 中心死區
     expect(center.R.state).toBe('REST');
     expect(center.R.zone).toBe(null);
+  });
+
+  it('快速掃過扇形(停留 < dwell)不發聲;停留夠久才確認(跟琴鍵同款 dwell)', () => {
+    const m = createMapper({ disks: DISKS, keyboard: PIZZA });
+    const tip = sector(3);
+    m.update([tip], DESIGN_VIEW, 1 / 60);
+    const quick = m.update([tip], DESIGN_VIEW, 1 / 60); // 累積 ~17ms < dwell 80ms
+    expect(quick.R.state).toBe('REST');
+    let res;
+    for (let i = 0; i < 10; i++) res = m.update([tip], DESIGN_VIEW, 1 / 60); // 累積 > dwell
+    expect(res.R.state).toBe('ACTIVE');
+    expect(res.R.zone).toBe(3);
+  });
+
+  it('靈敏度(setDwell)確實套用到 pizza:換音 dwell 調高 → 同樣停留時間不發聲', () => {
+    const m = createMapper({ disks: DISKS, keyboard: PIZZA });
+    m.setDwell(300, 20); // 換音 dwell 拉到 300ms
+    const tip = sector(3);
+    let res;
+    for (let i = 0; i < 10; i++) res = m.update([tip], DESIGN_VIEW, 1 / 60); // ~167ms < 300ms
+    expect(res.R.state).toBe('REST'); // dwell 確實生效在圓盤上
+    for (let i = 0; i < 12; i++) res = m.update([tip], DESIGN_VIEW, 1 / 60); // 再累積 > 300ms
+    expect(res.R.state).toBe('ACTIVE');
+    expect(res.R.zone).toBe(3);
   });
 });
 
