@@ -19,6 +19,10 @@ import {
   KEY_OFFSETS,
   BPM,
   GROOVE_DEFAULT_ON,
+  KEYBOARD,
+  DWELL_LEVELS,
+  KEY_DWELL_DIFF_MS,
+  KEY_DWELL_SAME_MS,
 } from './config.js';
 
 /**
@@ -216,7 +220,37 @@ export function createUI({ root, onChange }) {
       instSelect = el;
     });
 
-    const controls = h('div', { class: 'controls' }, [scalePill, keyPill, groovePill, instPill]);
+    // 右手排列模式切換(三度 / 單排鍵盤)
+    const layoutPill = makeSelectPill(
+      '排列',
+      [
+        { value: 'thirds', label: '三度' },
+        { value: 'row', label: '鍵盤' },
+      ],
+      (v) => onChange({ type: 'layout', mode: v }),
+      (el) => {
+        el.value = KEYBOARD.defaultMode;
+      },
+    );
+
+    // 靈敏度:換音 / 同音 兩段(dwell 毫秒;越小越靈敏 → 越快發聲)
+    const dwellOptions = DWELL_LEVELS.map((d) => ({ value: String(d.ms), label: d.label }));
+    const diffPill = makeSelectPill('換音靈敏', dwellOptions, (v) => onChange({ type: 'dwellDiff', ms: Number(v) }), (el) => {
+      el.value = String(KEY_DWELL_DIFF_MS);
+    });
+    const samePill = makeSelectPill('同音靈敏', dwellOptions, (v) => onChange({ type: 'dwellSame', ms: Number(v) }), (el) => {
+      el.value = String(KEY_DWELL_SAME_MS);
+    });
+
+    const controls = h('div', { class: 'controls' }, [
+      scalePill,
+      keyPill,
+      layoutPill,
+      groovePill,
+      instPill,
+      diffPill,
+      samePill,
+    ]);
 
     topbar.replaceChildren(brand, controls);
   }

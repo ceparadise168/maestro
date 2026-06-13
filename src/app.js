@@ -16,7 +16,7 @@
  */
 
 import { CameraError } from './camera.js';
-import { DESIGN_VIEW, BPM, GROOVE_DEFAULT_ON, SLOTS, KEYBOARD } from './config.js';
+import { DESIGN_VIEW, BPM, GROOVE_DEFAULT_ON, SLOTS, KEYBOARD, melodyGeom } from './config.js';
 
 /**
  * 建立 app(尚未啟動;呼叫 start() 才真正開相機 + 偵測 + 迴圈)。
@@ -78,6 +78,7 @@ export function createApp(deps) {
   /** 伴奏律動狀態(真相;回灌 ui)。 */
   let grooveOn = GROOVE_DEFAULT_ON;
   let bpm = BPM;
+  let melodyMode = KEYBOARD.defaultMode; // 右手排列模式(thirds / row)
 
   // 上一幀的 L/R 狀態,做 diff(只在 changed 時打 audioEngine,設計 §5)。
   let prevL = { state: 'REST', zone: null };
@@ -142,6 +143,19 @@ export function createApp(deps) {
         break;
       case 'instrument':
         audioEngine.setInstrument(change.chordInst, change.melodyInst);
+        break;
+      case 'layout': {
+        melodyMode = change.mode;
+        const kb = melodyGeom(melodyMode);
+        mapper.setKeyboard(kb);
+        renderer.setKeyboard(kb);
+        break;
+      }
+      case 'dwellDiff':
+        mapper.setDwell(change.ms, undefined);
+        break;
+      case 'dwellSame':
+        mapper.setDwell(undefined, change.ms);
         break;
       default:
         break;

@@ -698,9 +698,14 @@ export function createRenderer({ canvas, disks, keyboard }) {
     drawKeyboard(keyboardCache, state ? state.R : null, present, anim.R);
   }
 
+  /** 切換右手旋律排列模式:用新幾何重建 pad 快取(draw 立即生效)。 */
+  function setKeyboard(kb) {
+    keyboardCache = buildKeyboard(kb);
+  }
+
   // 建構即預建幾何 + 量一次尺寸(若 canvas 已在 DOM)。
   prebuild();
   resize();
 
-  return { draw, resize };
+  return { draw, resize, setKeyboard };
 }

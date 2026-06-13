@@ -28,7 +28,7 @@ import {
   radiusOf,
   keyAtPoint,
 } from './geometry.js';
-import { ONE_EURO, HYSTERESIS_DEG, KEY_HYSTERESIS_PX, KEY_DWELL_MS } from './config.js';
+import { ONE_EURO, HYSTERESIS_DEG, KEY_HYSTERESIS_PX, KEY_DWELL_DIFF_MS, KEY_DWELL_SAME_MS } from './config.js';
 
 /**
  * One-Euro filter 名目取樣率(Hz),僅作為 update() 未帶實際 dt 時的後備值
@@ -249,12 +249,13 @@ function createDiskMachine(disk) {
  *  - 邊界遲滯:已在某鍵時用擴張邊界(KEY_HYSTERESIS_PX)判斷是否仍在,消除鍵緣抖動進出。
  * @param {Object} kb config.KEYBOARD(x0/x1/keys/gap/keyTop/keyBottom…)
  */
-function createKeyboardMachine(kb) {
+function createKeyboardMachine(kb, dwell) {
   const fx = createOneEuro(ONE_EURO);
   const fy = createOneEuro(ONE_EURO);
   let zone = null; // 已確認發聲的 pad(已過 dwell);null = 靜音
   let candidate = null; // 目前所在 pad(待 dwell 確認)
   let dwellMs = 0; // 已在 candidate 累積停留時間(ms)
+  let lastPlayed = null; // 上一個確認發聲過的 pad(跨靜音記憶;判斷「同音重觸」)
   let state = 'REST';
 
   /**
@@ -300,15 +301,18 @@ function createKeyboardMachine(kb) {
       candidate = key;
       state = 'ACTIVE';
     } else {
-      // 進入「非當前發聲」的 pad → 須停留 ≥ KEY_DWELL_MS 才確認(過濾快速經過)。
+      // 進入「非當前發聲」的 pad → 須停留夠久才確認(過濾快速經過)。
       if (key === candidate) {
         dwellMs += dt * 1000;
       } else {
         candidate = key;
         dwellMs = 0;
       }
-      if (dwellMs >= KEY_DWELL_MS) {
+      // 同音重觸(candidate === 上次發聲音)用較短 dwell.sameMs;換到不同音用較長 dwell.diffMs。
+      const threshold = candidate === lastPlayed ? dwell.sameMs : dwell.diffMs;
+      if (dwellMs >= threshold) {
         zone = candidate; // 停留夠久 → 確認發聲
+        lastPlayed = candidate;
         state = 'ACTIVE';
       } else {
         zone = null; // 尚未停留足夠(可能只是快速經過)→ 不發新音;舊音(若有)離開時已停
@@ -326,6 +330,7 @@ function createKeyboardMachine(kb) {
     zone = null;
     candidate = null;
     dwellMs = 0;
+    lastPlayed = null;
     state = 'REST';
   }
 
@@ -352,7 +357,9 @@ function createKeyboardMachine(kb) {
  */
 export function createMapper({ disks, keyboard }) {
   const machineL = createDiskMachine(disks.L);
-  const machineR = createKeyboardMachine(keyboard);
+  let kbGeom = keyboard; // 可在執行期換排列模式(thirds / row)
+  const dwell = { diffMs: KEY_DWELL_DIFF_MS, sameMs: KEY_DWELL_SAME_MS }; // 兩段靈敏度(setDwell 可調)
+  let machineR = createKeyboardMachine(kbGeom, dwell);
   const fallbackDt = 1 / NOMINAL_FPS;
 
   // 中線分盤遲滯:記住每隻手「上一幀歸屬的盤」,避免手在畫面中央時於 L/R 間逐幀跳動
@@ -411,7 +418,7 @@ export function createMapper({ disks, keyboard }) {
         const dL = radiusOf(pt, disks.L);
         if (dL < bestLdist) { bestLdist = dL; bestL = pt; }
       } else {
-        const dR = Math.abs(pt.x - keyboard.cx);
+        const dR = Math.abs(pt.x - kbGeom.cx);
         if (dR < bestRdist) { bestRdist = dR; bestR = pt; }
       }
     }
@@ -439,5 +446,17 @@ export function createMapper({ disks, keyboard }) {
     lastSide = null;
   }
 
-  return { update, reset };
+  /** 切換右手旋律排列模式(thirds / row):重建 keyboard 機制、沿用同一 dwell 設定。 */
+  function setKeyboard(kb) {
+    kbGeom = kb;
+    machineR = createKeyboardMachine(kb, dwell);
+  }
+
+  /** 即時調整兩段靈敏度(dwell 毫秒);傳 undefined 的維持不動。 */
+  function setDwell(diffMs, sameMs) {
+    if (typeof diffMs === 'number') dwell.diffMs = diffMs;
+    if (typeof sameMs === 'number') dwell.sameMs = sameMs;
+  }
+
+  return { update, reset, setKeyboard, setDwell };
 }

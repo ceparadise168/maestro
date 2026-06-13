@@ -33,11 +33,21 @@ export const HYSTERESIS_DEG = 7;
 export const KEY_HYSTERESIS_PX = 8;
 
 /**
- * 旋律 pad 的「停留確認」時間(毫秒)。手指進入新 pad 須停留 ≥ 此時間才發聲,
- * 用來過濾「快速經過」造成的誤觸(在 pad 內時間 < 此值就掠過 → 不發聲)。
- * 越大越不靈敏、但發聲延遲越高。取 80ms。
+ * 旋律 pad 的「停留確認」時間(毫秒):手指進入 pad 須停留 ≥ 此時間才發聲,過濾「快速經過」誤觸。
+ * 分兩段(2026-06-14 使用者要求):
+ *  - DIFF:換到「不同」音 → 較長,過濾掃過其他音。
+ *  - SAME:重觸「同一」音(剛離開又回來)→ 較短,讓連打同音跟手。
+ * 越大越不靈敏、發聲延遲越高;可由 UI 即時調整(見 DWELL_LEVELS)。
  */
-export const KEY_DWELL_MS = 80;
+export const KEY_DWELL_DIFF_MS = 80;
+export const KEY_DWELL_SAME_MS = 30;
+
+/** 靈敏度 UI 檔位:label → dwell 毫秒(越小越靈敏)。「換音 / 同音」兩個控制共用此檔位表。 */
+export const DWELL_LEVELS = [
+  { id: 'fast', label: '靈敏', ms: 30 },
+  { id: 'mid', label: '中', ms: 80 },
+  { id: 'slow', label: '鈍', ms: 150 },
+];
 
 /**
  * One-Euro filter 起始參數(對食指尖座標平滑;設計 §2.3)。
@@ -98,42 +108,71 @@ export const DISKS = {
 };
 
 /**
- * 右手旋律「隔空琴鍵 + 演奏線」幾何(設計空間 1280×720;2026-06-13 取代圓盤)。
- * 互動:手在「演奏線上方」水平移動 = 瞄準某鍵(不發聲);壓過線進入鍵 = 發該音;
- * 抬回線上 = 靜音。壓下瞬間鎖定當下瞄準鍵、線下水平移動不換音(徹底消除「經過誤觸」)。
- * 演奏線雙閾值遲滯(pressY/releaseY):壓過 pressY 才發、抬過 releaseY 才停,
- * 中間帶不切換 → 手停在線附近不會狂發。
- *  - x0/x1:鍵區水平範圍;keys:鍵數;keyTop/keyBottom:鍵的 y 範圍(設計空間像素)。
- *  - lineY:演奏線 y;pressY/releaseY:發聲/靜音雙閾值(y 向下為正)。
- *  - cx:區域中心,供「螢幕左右位置分盤」用(與左盤中線一致)。
+ * 右手旋律幾何(設計空間 1280×720)。in-shape:手指在某 pad 形狀內 → 發該音;pad 之間/之外 → 靜音。
+ * 兩種可切換排列(2026-06-14 使用者要求,UI 可切):
+ *  - thirds(2D 三度排列,預設):上排 C E G B、下排錯半格 D F A → 相鄰/三度移動不經過其他鍵;方塊大。
+ *  - row(單排鍵盤排列):C..B 由左到右一排;直覺,但相鄰移動會經過中間音。
+ * 各 mode 提供 layout(每音 row/col)+ 幾何(originX/colStep/rowOffsetX/topY/rowStep/padW/padH)。
+ * 共用:cx(分盤中心,須在中線 640 右側)、keys、keyColors(C..B 彩虹)、色/角色/標籤。
  */
 export const KEYBOARD = {
-  cx: 910, // 區域中心(螢幕左右分盤用);整排須在螢幕中線 640 右側,否則最左鍵會被左手搶走
+  cx: 920, // 區域中心(分盤用;兩種排列都在中線 640 右側)
   keys: 7, // C D E F G A B(index 0..6)
-  // 2D「三度排列」(2026-06-13):相鄰音與三度都是斜對角 / 同排鄰居 → 兩鍵間移動不經過其他鍵。
-  // 上排 C E G B(index 0,2,4,6),下排錯半格 D F A(index 1,3,5)。兩排 → 方形 pad 可放大(每排只 3~4 顆)。
-  layout: [
-    { row: 0, col: 0 }, // C
-    { row: 1, col: 0 }, // D
-    { row: 0, col: 1 }, // E
-    { row: 1, col: 1 }, // F
-    { row: 0, col: 2 }, // G
-    { row: 1, col: 2 }, // A
-    { row: 0, col: 3 }, // B
-  ],
-  originX: 660, // 上排 col0 左緣(> 640 中線右側)
-  colStep: 145, // 每欄水平間距(pad 寬 96 + 橫向空隙 49)
-  rowOffsetX: 72, // 下排水平偏移(半欄 → 錯位 brick 排列)
-  topY: 250, // 上排 pad 頂 y(整體垂直置中 ~373)
-  rowStep: 150, // 兩排垂直間距(pad 高 96 + 垂直空隙 54;空隙 > 2×遲滯,有可休息的靜音空白)
-  padW: 96, // 方形 pad 寬(大幅放大:50→96)
-  padH: 96, // 方形 pad 高
-  // 彩虹對應 C..B:紅 橙 黃 綠 藍 靛 紫
-  keyColors: ['#ff5a5a', '#ff9f43', '#ffd93d', '#4cd964', '#4d8cff', '#7b6cff', '#c061ff'],
-  color: COLORS.melody, // 主色(游標 / fallback)
+  keyColors: ['#ff5a5a', '#ff9f43', '#ffd93d', '#4cd964', '#4d8cff', '#7b6cff', '#c061ff'], // 紅橙黃綠藍靛紫
+  color: COLORS.melody,
   role: 'melody',
   hubLabel: 'MELODY',
+  defaultMode: 'thirds',
+  modes: {
+    // 2D 三度排列:上排 C E G B(0,2,4,6)、下排錯半格 D F A(1,3,5)
+    thirds: {
+      layout: [
+        { row: 0, col: 0 }, // C
+        { row: 1, col: 0 }, // D
+        { row: 0, col: 1 }, // E
+        { row: 1, col: 1 }, // F
+        { row: 0, col: 2 }, // G
+        { row: 1, col: 2 }, // A
+        { row: 0, col: 3 }, // B
+      ],
+      originX: 660,
+      colStep: 145, // pad 96 + 空隙 49
+      rowOffsetX: 72, // 半欄錯位 brick
+      topY: 250,
+      rowStep: 150, // pad 96 + 垂直空隙 54
+      padW: 96,
+      padH: 96,
+    },
+    // 單排鍵盤排列:C..B 由左到右(全 row 0)
+    row: {
+      layout: [
+        { row: 0, col: 0 }, // C
+        { row: 0, col: 1 }, // D
+        { row: 0, col: 2 }, // E
+        { row: 0, col: 3 }, // F
+        { row: 0, col: 4 }, // G
+        { row: 0, col: 5 }, // A
+        { row: 0, col: 6 }, // B
+      ],
+      originX: 656,
+      colStep: 80, // pad 56 + 空隙 24
+      rowOffsetX: 0,
+      topY: 300,
+      rowStep: 0,
+      padW: 56,
+      padH: 150, // 直立鍵
+    },
+  },
 };
+
+/**
+ * 取得某排列模式的「完整生效幾何」(共用欄位 + 該 mode 的 layout/幾何);供 mapper/renderer 使用。
+ * @param {'thirds'|'row'} mode
+ */
+export function melodyGeom(mode) {
+  const m = KEYBOARD.modes[mode] || KEYBOARD.modes[KEYBOARD.defaultMode];
+  return { ...KEYBOARD, ...m };
+}
 
 // ───────────────────────── 樂理映射(設計 §3) ─────────────────────────
 /**

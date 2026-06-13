@@ -11,6 +11,7 @@
 import {
   DISKS,
   KEYBOARD,
+  melodyGeom,
   DEFAULT_KEY,
   DEFAULT_SCALE,
   BPM,
@@ -39,8 +40,10 @@ let app;
 const camera = createCamera({ video, mirror: true });
 const musicEngine = createMusicEngine({ key: DEFAULT_KEY, scale: DEFAULT_SCALE });
 const audioEngine = createAudioEngine();
-const mapper = createMapper({ disks: DISKS, keyboard: KEYBOARD });
-const renderer = createRenderer({ canvas, disks: DISKS, keyboard: KEYBOARD });
+// 右手旋律以「預設排列模式」的生效幾何啟動;之後 ui 可切換(app.applyChange 'layout')。
+const initKeyboard = melodyGeom(KEYBOARD.defaultMode);
+const mapper = createMapper({ disks: DISKS, keyboard: initKeyboard });
+const renderer = createRenderer({ canvas, disks: DISKS, keyboard: initKeyboard });
 
 // handTracking 在建構時固定 onResults;轉發到 app 的 tips 緩存(設計 §5)。
 const handTracker = createHandTracker({
