@@ -51,7 +51,10 @@ body {
 .app {
   position: relative;
   width: 100vw;
-  height: 100vh;
+  height: 100vh; /* fallback:不支援 dvh 的舊瀏覽器 */
+  /* iOS Safari 的 100vh = 工具列收起後的「大」高度;改用 dvh(動態可視高度)讓舞台
+     貼合「分頁列 / 工具列佔用後的真實可視區」,避免底部(hint / 琴鍵)被瀏覽器 UI 裁掉。 */
+  height: 100dvh;
   overflow: hidden;
   background: var(--bg);
 }
