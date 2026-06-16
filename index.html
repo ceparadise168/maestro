@@ -30,6 +30,23 @@
 
     <!-- 覆蓋層:開始按鈕 / 載入態 / 錯誤卡片,ui.js 控制顯示 -->
     <div id="ui-overlay" class="ui-overlay"></div>
+
+    <!--
+      直向引導:本 app 是「雙手左右張開」的舞台(左手和弦盤、右手旋律琴鍵),
+      座標系統建在 1280×720 橫向設計空間;直向時視覺與手勢映射都會崩。
+      故直向時蓋此層引導轉向 —— 純 CSS @media(orientation:portrait) 驅動,
+      不依賴 JS(JS 未載入 / 失敗時,直向使用者也立刻看到引導、不撞壞畫面)。
+    -->
+    <div class="rotate-gate" role="dialog" aria-label="請把裝置轉成橫向">
+      <div class="rotate-card">
+        <div class="rotate-icon" aria-hidden="true">📱</div>
+        <h2 class="rotate-title">請把手機轉成<span>橫向</span></h2>
+        <p class="rotate-lead">
+          Maestro 是雙手演奏 —— 左手和弦、右手旋律,<br />
+          橫向才放得下整個舞台 🎹
+        </p>
+      </div>
+    </div>
   </div>
 
   <!--

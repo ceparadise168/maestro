@@ -680,6 +680,103 @@ body {
 }
 
 /* ===========================================================================
+   直向引導層(.rotate-gate)— 純 CSS,直向時蓋全屏引導使用者轉成橫向。
+   本 app 是「雙手左右張開」的舞台(左手和弦盤 / 右手旋律琴鍵),座標系統建在
+   1280×720 橫向設計空間;直向時視覺裁切 + 手勢映射雙雙崩壞,故一律擋下並引導,
+   不讓使用者撞見壞畫面。z-index 高於所有 UI(overlay 20 / sens-pop 50)。
+   =========================================================================== */
+.rotate-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: none; /* 預設不顯示;僅直向(orientation:portrait)亮起 */
+  align-items: center;
+  justify-content: center;
+  padding: max(32px, env(safe-area-inset-top)) 32px max(32px, env(safe-area-inset-bottom));
+  text-align: center;
+  background:
+    radial-gradient(80% 60% at 50% 36%, rgba(255, 95, 162, 0.16), transparent 70%),
+    radial-gradient(75% 55% at 50% 100%, rgba(39, 224, 200, 0.14), transparent 72%),
+    var(--bg);
+}
+@media (orientation: portrait) {
+  .rotate-gate {
+    display: flex;
+  }
+}
+.rotate-card {
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.rotate-icon {
+  font-size: 66px;
+  line-height: 1;
+  filter: drop-shadow(0 8px 20px rgba(39, 224, 200, 0.4));
+  transform-origin: 50% 50%;
+  animation: rotate-hint 2.6s ease-in-out infinite;
+}
+/* 📱 由直立轉到橫放(停在橫向較久)→ 暗示「請這樣轉」。 */
+@keyframes rotate-hint {
+  0%, 30% { transform: rotate(0deg); }
+  56%, 90% { transform: rotate(90deg); }
+  100% { transform: rotate(0deg); }
+}
+.rotate-title {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.rotate-title span {
+  color: var(--melody);
+}
+.rotate-lead {
+  color: var(--dim);
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+/* ===========================================================================
+   橫向手機(矮螢幕)—— 垂直空間稀缺,壓扁 topbar / hint 把高度讓給舞台。
+   用 max-height 而非 max-width:精準命中「橫向手機」(高 ~375–430),不誤傷
+   iPad 橫向(高 768+)與筆電。直向手機由 .rotate-gate 擋下,不適用此規則。
+   =========================================================================== */
+@media (max-height: 480px) {
+  .ui-topbar {
+    padding: max(7px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 7px
+      max(12px, env(safe-area-inset-left));
+    gap: 8px;
+  }
+  .controls {
+    gap: 7px;
+  }
+  .pill {
+    padding: 6px 12px;
+    min-height: 34px;
+    font-size: 12.5px;
+    gap: 6px;
+  }
+  .bpm-range {
+    width: 60px;
+  }
+  .brand .nm {
+    font-size: 15px;
+  }
+  .live {
+    padding: 4px 8px;
+    font-size: 10px;
+  }
+  .ui-hint {
+    padding: 8px max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+    gap: 8px 14px;
+    font-size: 11.5px;
+  }
+}
+
+/* ===========================================================================
    尊重系統「減少動態」偏好:關閉裝飾性動畫(脈動 / 漂移 / 入場),
    保留功能性即時回饋(Canvas 內手感由 JS 控,不在此規範)。
    =========================================================================== */
@@ -688,6 +785,7 @@ body {
   .hint-status-dot,
   .card-glow,
   .card,
+  .rotate-icon,
   .ui-overlay.is-visible {
     animation: none !important;
   }
